@@ -1,0 +1,453 @@
+/**
+ * @jev-harness/pi - TypeSafe Jev (System One) judgments as a Pi extension.
+ *
+ * Registers five fail-open tools (jev_ask, jev_models, jev_route_skills,
+ * jev_pick_tool, jev_browse_goal) plus two hooks:
+ * - session_before_compact: verbatim compaction driven by two noul
+ *   judgments per tool call/result pair.
+ * - input: append-only skill-router advisory (never blocks or rewrites).
+ *
+ * Every Jev call fails OPEN: errors resolve to advisory text (tools) or
+ * undefined (hooks), so the host agent never stalls because Jev is down.
+ * The API key is read from the environment on each call and never logged.
+ */
+import {
+  askJev,
+  chooseBrowserAction,
+  listJevModels,
+  noul,
+  pickTool,
+  routeSkill,
+  type JevConfig,
+  type Questions,
+} from "@jev-harness/core";
+import type {
+  ExtensionAPI,
+  SessionBeforeCompactEvent,
+} from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+
+/** Shared with the OMP adapter: pairs below this keep-score are stale. */
+const DEFAULT_KEEP_THRESHOLD = 0.2;
+/** Upper bound on pairs judged in one compaction pass. */
+const MAX_COMPACTION_PAIRS = 40;
+
+function resolveJevConfig(): JevConfig {
+  const timeoutRaw = Number(process.env.JEV_TIMEOUT_MS ?? "");
+  const config: JevConfig = {
+    apiKey: process.env.TYPESAFE_API_KEY ?? "",
+  };
+  const baseUrl = (process.env.TYPESAFE_BASE_URL ?? "").trim();
+  if (baseUrl) config.baseUrl = baseUrl;
+  const model = (process.env.TYPESAFE_DEFAULT_MODEL ?? "").trim();
+  if (model) config.model = model;
+  if (Number.isFinite(timeoutRaw) && timeoutRaw > 0) config.timeoutMs = timeoutRaw;
+  return config;
+}
+
+function keepThreshold(): number {
+  const raw = Number(process.env.OMP_JEV_KEEP_THRESHOLD ?? "");
+  if (Number.isFinite(raw) && raw >= 0 && raw <= 1) return raw;
+  return DEFAULT_KEEP_THRESHOLD;
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? text.slice(0, max) + " [truncated]" : text;
+}
+
+function errorText(tool: string, err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return tool + " failed (fail-open, host unaffected): " + msg.slice(0, 500);
+}
+
+function ok(text: string, details?: unknown) {
+  return { content: [{ type: "text" as const, text }], details };
+}
+
+/** Plain-text head of a tool-result content payload. */
+function blockText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (
+      typeof block === "object" &&
+      block !== null &&
+      (block as { type?: unknown }).type === "text" &&
+      typeof (block as { text?: unknown }).text === "string"
+    ) {
+      parts.push((block as { text: string }).text);
+    }
+  }
+  return parts.join("\n");
+}
+
+interface ToolPair {
+  key: string;
+  tool: string;
+  argsText: string;
+  resultText: string;
+}
+
+/**
+ * Pair assistant tool calls with their results by toolCallId.
+ * Only complete pairs are eligible for keep/drop judgments.
+ */
+function collectToolPairs(
+  entries: SessionBeforeCompactEvent["branchEntries"],
+): ToolPair[] {
+  const calls = new Map<string, { tool: string; argsText: string }>();
+  const results = new Map<string, string>();
+  for (const entry of entries) {
+    if (entry.type !== "message") continue;
+    const message = entry.message;
+    if (message.role === "assistant") {
+      for (const block of message.content) {
+        if (block.type === "toolCall") {
+          calls.set(block.id, {
+            tool: block.name,
+            argsText: truncate(JSON.stringify(block.arguments ?? {}), 500),
+          });
+        }
+      }
+    } else if (message.role === "toolResult") {
+      results.set(message.toolCallId, truncate(blockText(message.content), 500));
+    }
+  }
+  const pairs: ToolPair[] = [];
+  for (const [id, call] of calls) {
+    const resultText = results.get(id);
+    if (resultText === undefined) continue;
+    pairs.push({ key: id, tool: call.tool, argsText: call.argsText, resultText });
+    if (pairs.length >= MAX_COMPACTION_PAIRS) break;
+  }
+  return pairs;
+}
+
+export default function jevPi(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "jev_ask",
+    label: "Jev ask",
+    description:
+      "Ask TypeSafe Jev (System One) for calibrated judgments over an arbitrary JSON state. " +
+      "Pass questions as a map of id to {type: noul|choice|score, instructions, criteria}. " +
+      "Fail-open: Jev errors return advisory text, never throw.",
+    parameters: Type.Object({
+      state: Type.Unknown({
+        description: "Arbitrary JSON state the questions are judged against.",
+      }),
+      questions: Type.Unknown({
+        description:
+          "Map of question id to question. noul needs instructions; " +
+          "choice needs criteria as an object with at least 2 options; " +
+          "score needs criteria as an ordered array with at least 2 levels.",
+      }),
+    }),
+    execute: async (_id, params, signal) => {
+      try {
+        const response = await askJev(
+          resolveJevConfig(),
+          params.state,
+          params.questions as Questions,
+          signal ?? undefined,
+        );
+        return ok(JSON.stringify(response.answers, null, 2), {
+          model: response.model,
+          usage: response.usage,
+        });
+      } catch (err) {
+        return ok(errorText("jev_ask", err));
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "jev_models",
+    label: "Jev models",
+    description:
+      "List the TypeSafe Jev models available to the configured key. " +
+      "Fail-open: errors return advisory text, never throw.",
+    parameters: Type.Object({}),
+    execute: async () => {
+      try {
+        const models = await listJevModels(resolveJevConfig());
+        const lines = models.map((m) =>
+          m.description ? m.name + " - " + m.description : m.name,
+        );
+        return ok(
+          lines.length > 0 ? lines.join("\n") : "No Jev models returned.",
+          { count: models.length },
+        );
+      } catch (err) {
+        return ok(errorText("jev_models", err));
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "jev_route_skills",
+    label: "Jev route skills",
+    description:
+      "Route a request to one skill (or none) using Jev. " +
+      "Send skill DESCRIPTIONS, not bare names. " +
+      "Fail-open: errors return advisory text, never throw.",
+    parameters: Type.Object({
+      message: Type.String({ description: "The user request to route." }),
+      skills: Type.Array(
+        Type.Object({
+          name: Type.String(),
+          description: Type.Optional(Type.String()),
+        }),
+        {
+          description:
+            "Candidate skills. Descriptions matter far more than names.",
+        },
+      ),
+      minConfidence: Type.Optional(
+        Type.Number({
+          description: "Minimum confidence to select a skill. Default 0.5.",
+        }),
+      ),
+    }),
+    execute: async (_id, params, signal) => {
+      try {
+        const result = await routeSkill(
+          resolveJevConfig(),
+          params.message,
+          params.skills.map((s) => ({
+            name: s.name,
+            description: s.description ?? "",
+          })),
+          { minConfidence: params.minConfidence, signal: signal ?? undefined },
+        );
+        return ok(JSON.stringify(result, null, 2), result);
+      } catch (err) {
+        return ok(errorText("jev_route_skills", err));
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "jev_pick_tool",
+    label: "Jev pick tool",
+    description:
+      "Select one tool (or none) for a task using Jev, with a confirmation " +
+      "flag for side-effecting choices. Does not execute anything. " +
+      "Fail-open: errors return advisory text, never throw.",
+    parameters: Type.Object({
+      task: Type.String({ description: "The task to accomplish." }),
+      tools: Type.Array(
+        Type.Object({
+          name: Type.String(),
+          description: Type.String(),
+        }),
+        { description: "Candidate tools with descriptions." },
+      ),
+      context: Type.Optional(Type.String()),
+    }),
+    execute: async (_id, params, signal) => {
+      try {
+        const result = await pickTool(
+          resolveJevConfig(),
+          {
+            task: params.task,
+            tools: params.tools.map((t) => ({
+              name: t.name,
+              description: t.description,
+            })),
+            context: params.context,
+          },
+          { signal: signal ?? undefined },
+        );
+        return ok(JSON.stringify(result, null, 2), result);
+      } catch (err) {
+        return ok(errorText("jev_pick_tool", err));
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "jev_browse_goal",
+    label: "Jev browse goal",
+    description:
+      "Pick the single next browser operation that best advances a goal, " +
+      "using Jev over a page snapshot. Does not execute anything. " +
+      "Fail-open: errors return advisory text, never throw.",
+    parameters: Type.Object({
+      goal: Type.String({ description: "What the browsing task must achieve." }),
+      page: Type.Object({
+        url: Type.String(),
+        title: Type.Optional(Type.String()),
+        text: Type.Optional(Type.String()),
+      }),
+      elements: Type.Array(
+        Type.Object({
+          index: Type.String(),
+          label: Type.String(),
+          role: Type.Optional(Type.String()),
+          value: Type.Optional(Type.String()),
+          operations: Type.Array(Type.String()),
+        }),
+      ),
+      recentActions: Type.Optional(
+        Type.Array(
+          Type.Object({
+            action: Type.String(),
+            kind: Type.Optional(Type.String()),
+            pageChanged: Type.Optional(Type.Boolean()),
+          }),
+        ),
+      ),
+    }),
+    execute: async (_id, params, signal) => {
+      try {
+        const result = await chooseBrowserAction(
+          resolveJevConfig(),
+          {
+            goal: params.goal,
+            page: {
+              url: params.page.url,
+              title: params.page.title,
+              text: params.page.text,
+            },
+            elements: params.elements.map((e) => ({
+              index: e.index,
+              label: e.label,
+              role: e.role,
+              value: e.value,
+              operations: e.operations,
+            })),
+            recentActions: params.recentActions?.map((a) => ({
+              action: a.action,
+              kind: a.kind,
+              pageChanged: a.pageChanged,
+            })),
+          },
+          { signal: signal ?? undefined },
+        );
+        return ok(JSON.stringify(result, null, 2), result);
+      } catch (err) {
+        return ok(errorText("jev_browse_goal", err));
+      }
+    },
+  });
+
+  pi.on("session_before_compact", async (event) => {
+    try {
+      if (!(process.env.TYPESAFE_API_KEY ?? "").trim()) return undefined;
+      const pairs = collectToolPairs(event.branchEntries);
+      if (pairs.length === 0) return undefined;
+      const threshold = keepThreshold();
+      const questions: Questions = {};
+      for (const p of pairs) {
+        questions["keep_call_" + p.key] = {
+          type: "noul",
+          instructions:
+            "This tool call is still load-bearing for the ongoing task; " +
+            "dropping it from context would lose information the agent still needs. " +
+            "Tool: " + p.tool + ". Arguments: " + p.argsText,
+        };
+        questions["keep_result_" + p.key] = {
+          type: "noul",
+          instructions:
+            "The result of this tool call is still needed for the ongoing task; " +
+            "dropping it would lose information the agent still needs. " +
+            "Tool: " + p.tool + ". Result (head): " + p.resultText,
+        };
+      }
+      const response = await askJev(
+        resolveJevConfig(),
+        {
+          pairs: pairs.map((p) => ({
+            tool: p.tool,
+            argsText: p.argsText,
+            resultText: p.resultText,
+          })),
+        },
+        questions,
+        event.signal,
+      );
+      const decisions = pairs.map((p) => {
+        let keepCall = 1;
+        let keepResult = 1;
+        try {
+          keepCall = noul(response, "keep_call_" + p.key);
+        } catch {
+          keepCall = 1;
+        }
+        try {
+          keepResult = noul(response, "keep_result_" + p.key);
+        } catch {
+          keepResult = 1;
+        }
+        return {
+          key: p.key,
+          tool: p.tool,
+          keepCall,
+          keepResult,
+          stale: keepCall < threshold && keepResult < threshold,
+        };
+      });
+      const stale = decisions.filter((d) => d.stale);
+      if (stale.length === 0) return undefined;
+      const firstEntryId = event.branchEntries[0]?.id;
+      if (!firstEntryId) return undefined;
+      const staleNames = stale.map((d) => d.tool).join(", ");
+      const summary =
+        "jev-compaction: judged " +
+        String(pairs.length) +
+        " tool pair(s); " +
+        String(stale.length) +
+        " stale (" +
+        staleNames +
+        "). History kept verbatim; per-pair scores in details.";
+      return {
+        compaction: {
+          summary,
+          firstKeptEntryId: firstEntryId,
+          tokensBefore: event.preparation.tokensBefore,
+          details: {
+            shortSummary:
+              "jev: " + String(stale.length) + "/" + String(pairs.length) + " tool pairs stale",
+            threshold,
+            decisions,
+          },
+        },
+      };
+    } catch {
+      return undefined;
+    }
+  });
+
+  pi.on("input", (event, ctx) => {
+    try {
+      const text = event.text ?? "";
+      if (!text.trim()) return undefined;
+      if (!(process.env.TYPESAFE_API_KEY ?? "").trim()) return undefined;
+      const tools = pi.getAllTools();
+      if (tools.length === 0) return undefined;
+      void routeSkill(
+        resolveJevConfig(),
+        text.slice(0, 2000),
+        tools.map((t) => ({ name: t.name, description: t.description ?? "" })),
+        { minConfidence: 0.5 },
+      )
+        .then((r) => {
+          if (r.skill) {
+            ctx.ui.notify(
+              "jev: " +
+                r.skill +
+                " looks relevant (" +
+                String(Math.round(r.confidence * 100)) +
+                "%)",
+              "info",
+            );
+          }
+        })
+        .catch(() => {});
+    } catch {
+      // Fail open: input is never blocked or rewritten by this hook.
+    }
+    return undefined;
+  });
+}

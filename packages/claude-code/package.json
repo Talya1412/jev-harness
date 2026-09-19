@@ -1,0 +1,28 @@
+{
+  "name": "@jev-harness/claude-code",
+  "version": "0.1.0",
+  "description": "Claude Code plugin: TypeSafe Jev (System One) destructive-tool gating and skill routing.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "hooks",
+    ".claude-plugin",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@jev-harness/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

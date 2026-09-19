@@ -1,0 +1,61 @@
+{
+  "name": "@jev-harness/omp",
+  "version": "0.1.0",
+  "description": "OMP-native adapter: Jev (System One) tools and opt-in auto-hooks for Oh My Pi.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@jev-harness/core": "^0.1.0"
+  },
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": "*"
+  },
+  "omp": {
+    "extensions": [
+      "./dist/extension.js"
+    ],
+    "envDocs": {
+      "TYPESAFE_API_KEY": "Required. System One API key. Never hardcoded, never logged.",
+      "TYPESAFE_BASE_URL": "Override. Default https://api.typesafe.ai.",
+      "TYPESAFE_DEFAULT_MODEL": "Override. Default jev-latest.",
+      "JEV_TIMEOUT_MS": "Override. Per-request timeout in ms. Default 15000.",
+      "OMP_JEV_AUTO": "Master switch for all auto hooks. Set to 1 to enable.",
+      "OMP_JEV_GATE": "tool_call destructive gate off-switch. Set to 0 to disable (default enabled when OMP_JEV_AUTO=1).",
+      "OMP_JEV_SKILL_ROUTER": "input skill-suggestion off-switch. Set to 0 to disable.",
+      "OMP_JEV_CONTEXT": "session_before_compact verbatim-compaction off-switch. Set to 0 to disable.",
+      "OMP_JEV_KEEP_THRESHOLD": "Keep probability threshold for compaction. Default 0.2.",
+      "OMP_JEV_MAX_STATE_TOKENS": "Compaction state budget. Default 25000.",
+      "OMP_JEV_MAX_REQUEST_TOKENS": "Compaction per-request budget. Default 30000.",
+      "OMP_JEV_TRUNCATE_HEAD": "Kept head chars for truncated tool results. Default 300.",
+      "OMP_JEV_MIN_REDUCTION": "Minimum saved/total char ratio before returning a compaction. Default 0.25."
+    }
+  },
+  "keywords": [
+    "jev",
+    "typesafe",
+    "system-one",
+    "oh-my-pi",
+    "omp",
+    "extension"
+  ]
+}

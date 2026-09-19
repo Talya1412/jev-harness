@@ -1,0 +1,159 @@
+import { describe, it, expect } from "vitest";
+import { routeSkill, judgeDestructive, pickTool, chooseBrowserAction, rankCandidates } from "../src/patterns.js";
+import type { JevResponse } from "../src/types.js";
+
+/** Route every call through a canned response, recording the request bodies. */
+function jevStub(answers: JevResponse["answers"]) {
+  const seen: any[] = [];
+  const fetchImpl = (async (_url: any, init: any) => {
+    seen.push(JSON.parse(String(init.body)));
+    return new Response(JSON.stringify({ model: "jev-1.13.0", answers }), { status: 200 });
+  }) as unknown as typeof fetch;
+  return { fetchImpl, seen };
+}
+
+describe("routeSkill", () => {
+  it("returns null when there are no candidates", async () => {
+    const { fetchImpl } = jevStub({});
+    const r = await routeSkill({ apiKey: "k", fetchImpl }, "do a thing", []);
+    expect(r.skill).toBeNull();
+  });
+
+  it("sends skill DESCRIPTIONS, not just names", async () => {
+    const { fetchImpl, seen } = jevStub({ best: { type: "choice", choice: "browser", confidence: 0.9, probabilities: {} } });
+    await routeSkill({ apiKey: "k", fetchImpl }, "test the login page", [
+      { name: "browser", description: "Automate browser interactions and run Playwright tests." },
+      { name: "desktop", description: "OS-level window inspection and input." },
+    ]);
+    const criteria = seen[0].questions.best.criteria;
+    expect(criteria.browser).toMatch(/Automate browser interactions/);
+    expect(criteria.desktop).toMatch(/OS-level window/);
+  });
+
+  it("abstains below the confidence floor", async () => {
+    const { fetchImpl } = jevStub({ best: { type: "choice", choice: "browser", confidence: 0.3, probabilities: {} } });
+    const r = await routeSkill({ apiKey: "k", fetchImpl }, "x", [{ name: "browser" }]);
+    expect(r.skill).toBeNull();
+  });
+
+  it("treats an explicit none as no match", async () => {
+    const { fetchImpl } = jevStub({ best: { type: "choice", choice: "none", confidence: 0.99, probabilities: {} } });
+    const r = await routeSkill({ apiKey: "k", fetchImpl }, "write a haiku", [{ name: "browser" }]);
+    expect(r.skill).toBeNull();
+  });
+
+  it("caps the candidate list", async () => {
+    const { fetchImpl, seen } = jevStub({ best: { type: "choice", choice: "s1", confidence: 0.9, probabilities: {} } });
+    const many = Array.from({ length: 40 }, (_, i) => ({ name: `s${i}` }));
+    await routeSkill({ apiKey: "k", fetchImpl }, "x", many, { maxCandidates: 5 });
+    expect(Object.keys(seen[0].questions.best.criteria)).toHaveLength(6); // 5 + none
+  });
+});
+
+describe("judgeDestructive", () => {
+  it("blocks at or above the threshold", async () => {
+    const { fetchImpl } = jevStub({ destructive: { type: "noul", noul: 0.84 } });
+    const r = await judgeDestructive({ apiKey: "k", fetchImpl }, { tool: "bash", input: { cmd: "rm -rf /" } });
+    expect(r.blocked).toBe(true);
+  });
+
+  it("allows below the threshold", async () => {
+    const { fetchImpl } = jevStub({ destructive: { type: "noul", noul: 0.01 } });
+    const r = await judgeDestructive({ apiKey: "k", fetchImpl }, { tool: "bash", input: { cmd: "git status" } });
+    expect(r.blocked).toBe(false);
+  });
+
+  it("honours a custom threshold", async () => {
+    const { fetchImpl } = jevStub({ destructive: { type: "noul", noul: 0.6 } });
+    const r = await judgeDestructive({ apiKey: "k", fetchImpl }, { tool: "bash", input: {} }, { threshold: 0.5 });
+    expect(r.blocked).toBe(true);
+  });
+});
+
+describe("pickTool", () => {
+  it("flags confirmation when the risk score is high", async () => {
+    const { fetchImpl } = jevStub({
+      tool: { type: "choice", choice: "bash", confidence: 0.97, probabilities: {} },
+      risky: { type: "noul", noul: 0.64 },
+    });
+    const r = await pickTool({ apiKey: "k", fetchImpl }, { task: "rename files", tools: [{ name: "bash", description: "run a command" }] });
+    expect(r.tool).toBe("bash");
+    expect(r.confirmRequired).toBe(true);
+  });
+
+  it("does not act on a low-confidence pick", async () => {
+    const { fetchImpl } = jevStub({
+      tool: { type: "choice", choice: "bash", confidence: 0.2, probabilities: {} },
+      risky: { type: "noul", noul: 0.1 },
+    });
+    const r = await pickTool({ apiKey: "k", fetchImpl }, { task: "x", tools: [{ name: "bash", description: "d" }] });
+    expect(r.act).toBe(false);
+  });
+
+  it("returns a null pick for an empty tool list without calling Jev", async () => {
+    const { fetchImpl, seen } = jevStub({});
+    const r = await pickTool({ apiKey: "k", fetchImpl }, { task: "x", tools: [] });
+    expect(r.tool).toBeNull();
+    expect(seen).toHaveLength(0);
+  });
+});
+
+describe("chooseBrowserAction", () => {
+  it("returns the operation and its matching target", async () => {
+    const { fetchImpl } = jevStub({
+      operation: { type: "choice", choice: "CLICK", confidence: 0.84, probabilities: {} },
+      click_target: { type: "choice", choice: "1", confidence: 0.9, probabilities: {} },
+    });
+    const r = await chooseBrowserAction({ apiKey: "k", fetchImpl }, {
+      goal: "search",
+      page: { url: "https://example.com" },
+      elements: [{ index: "1", label: "Search", operations: ["CLICK", "TYPE_TEXT"] }],
+    });
+    expect(r.operation).toBe("CLICK");
+    expect(r.target).toBe("1");
+    expect(r.act).toBe(true);
+  });
+
+  it("only asks for targets of operations present in the snapshot", async () => {
+    const { fetchImpl, seen } = jevStub({
+      operation: { type: "choice", choice: "CLICK", confidence: 0.9, probabilities: {} },
+      click_target: { type: "choice", choice: "1", confidence: 0.9, probabilities: {} },
+    });
+    await chooseBrowserAction({ apiKey: "k", fetchImpl }, {
+      goal: "g",
+      page: { url: "u" },
+      elements: [{ index: "1", label: "L", operations: ["CLICK"] }],
+    });
+    const q = seen[0].questions;
+    expect(q.click_target).toBeDefined();
+    expect(q.type_text_target).toBeUndefined();
+    expect(q.select_target).toBeUndefined();
+  });
+
+  it("does not act on a low-confidence operation", async () => {
+    const { fetchImpl } = jevStub({ operation: { type: "choice", choice: "CLICK", confidence: 0.2, probabilities: {} } });
+    const r = await chooseBrowserAction({ apiKey: "k", fetchImpl }, {
+      goal: "g", page: { url: "u" }, elements: [{ index: "1", label: "L", operations: ["CLICK"] }],
+    });
+    expect(r.act).toBe(false);
+  });
+});
+
+describe("rankCandidates", () => {
+  it("sorts best-first by score", async () => {
+    const { fetchImpl } = jevStub({
+      fit_0: { type: "score", score: 0.2, confidence: 0.5, probabilities: {} },
+      fit_1: { type: "score", score: 2.8, confidence: 0.5, probabilities: {} },
+    });
+    const r = await rankCandidates({ apiKey: "k", fetchImpl }, "task", ["weak", "strong"]);
+    expect(r[0].candidate).toBe("strong");
+    expect(r[1].candidate).toBe("weak");
+  });
+
+  it("returns an empty list without calling Jev", async () => {
+    const { fetchImpl, seen } = jevStub({});
+    const r = await rankCandidates({ apiKey: "k", fetchImpl }, "task", []);
+    expect(r).toEqual([]);
+    expect(seen).toHaveLength(0);
+  });
+});

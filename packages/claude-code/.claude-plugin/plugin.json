@@ -1,0 +1,33 @@
+{
+  "name": "jev-harness",
+  "version": "0.1.0",
+  "description": "TypeSafe Jev (System One) judgments for Claude Code: destructive-tool gating and skill routing.",
+  "author": "jev-harness contributors",
+  "license": "Apache-2.0",
+  "userConfig": {
+    "apiKey": {
+      "type": "string",
+      "title": "TypeSafe API key",
+      "description": "TypeSafe API key. Leave unset to use TYPESAFE_API_KEY.",
+      "sensitive": true
+    },
+    "model": {
+      "type": "string",
+      "title": "Jev model",
+      "description": "TypeSafe Jev model name. Leave unset to use TYPESAFE_DEFAULT_MODEL.",
+      "default": "jev-latest"
+    },
+    "destructiveThreshold": {
+      "type": "number",
+      "title": "Destructive threshold",
+      "description": "Minimum Jev destructiveness probability that blocks a Bash/Write/Edit tool call.",
+      "default": 0.75
+    },
+    "skillConfidence": {
+      "type": "number",
+      "title": "Skill confidence",
+      "description": "Minimum Jev confidence before the UserPromptSubmit hook suggests a skill.",
+      "default": 0.5
+    }
+  }
+}

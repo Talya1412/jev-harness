@@ -1,0 +1,16 @@
+{
+  "name": "jev-harness",
+  "owner": {
+    "name": "jev-harness",
+    "url": "https://github.com/jev-harness/jev-harness"
+  },
+  "plugins": [
+    {
+      "name": "jev-harness",
+      "source": "./",
+      "description": "TypeSafe Jev (System One) judgments for Claude Code: destructive-tool gating and skill routing.",
+      "version": "0.1.0",
+      "license": "Apache-2.0"
+    }
+  ]
+}
