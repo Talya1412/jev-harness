@@ -10,6 +10,7 @@ import {
   type ChoiceAnswer,
   type ScoreAnswer,
 } from "./types.js";
+import { redactState } from "./redact.js";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -30,6 +31,7 @@ function resolveConfig(config: JevConfig) {
     maxAttempts: Math.max(1, config.maxAttempts ?? DEFAULT_MAX_ATTEMPTS),
     fetchImpl: config.fetchImpl ?? fetch,
     onRetry: config.onRetry,
+    redact: config.redact,
   };
 }
 
@@ -75,7 +77,19 @@ export async function askJev(
     throw new JevError("state is required", { retryable: false });
   }
 
-  const body = JSON.stringify({ model: cfg.model, state, questions });
+  // Redaction is a privacy control, not an availability control: if it ever
+  // throws, sending the original state is preferable to breaking the call.
+  let effectiveState: unknown = state;
+  if (cfg.redact) {
+    const opts = cfg.redact === true ? {} : cfg.redact;
+    try {
+      effectiveState = redactState(state, opts);
+    } catch {
+      effectiveState = state;
+    }
+  }
+
+  const body = JSON.stringify({ model: cfg.model, state: effectiveState, questions });
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {

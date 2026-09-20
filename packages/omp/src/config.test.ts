@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BASE_URL, DEFAULT_MODEL } from "@jev-harness/core";
-import { DEFAULT_TIMEOUT_MS, autoOn, envNum, readConfig } from "../src/config.js";
+import { DEFAULT_TIMEOUT_MS, autoOn, envNum, readConfig, redactOn } from "../src/config.js";
 
 describe("readConfig", () => {
   it("throws a credential error when the key is absent", () => {
@@ -37,6 +37,25 @@ describe("readConfig", () => {
       DEFAULT_TIMEOUT_MS
     );
     expect(readConfig({ TYPESAFE_API_KEY: "k", JEV_TIMEOUT_MS: "2500" }).timeoutMs).toBe(2500);
+  });
+
+  it("carries the redaction flag through", () => {
+    expect(readConfig({ TYPESAFE_API_KEY: "k" }, undefined, true).redact).toBe(true);
+    expect(readConfig({ TYPESAFE_API_KEY: "k" }, undefined, false).redact).toBe(false);
+  });
+});
+
+describe("redactOn", () => {
+  it("redacts hooks by default, tools not", () => {
+    expect(redactOn({}, "hook")).toBe(true);
+    expect(redactOn({}, "tool")).toBe(false);
+  });
+
+  it("OMP_JEV_REDACT=1 forces redaction everywhere, =0 disables it", () => {
+    expect(redactOn({ OMP_JEV_REDACT: "1" }, "tool")).toBe(true);
+    expect(redactOn({ OMP_JEV_REDACT: "1" }, "hook")).toBe(true);
+    expect(redactOn({ OMP_JEV_REDACT: "0" }, "hook")).toBe(false);
+    expect(redactOn({ OMP_JEV_REDACT: "0" }, "tool")).toBe(false);
   });
 });
 

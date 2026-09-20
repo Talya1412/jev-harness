@@ -19,6 +19,76 @@ var JevError = class extends Error {
   }
 };
 
+// ../core/dist/redact.js
+var PLACEHOLDER = "[REDACTED";
+var BUILTIN_REDACT_PATTERNS = [
+  { label: "aws-access-key", pattern: /\bAKIA[0-9A-Z]{16}\b/g },
+  {
+    label: "jwt",
+    pattern: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g
+  },
+  {
+    label: "private-key",
+    pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g
+  },
+  {
+    label: "github-token",
+    pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})\b/g
+  },
+  { label: "slack-token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g },
+  { label: "api-key", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
+  {
+    label: "auth-header",
+    pattern: /\b(Bearer|Basic)\s+[A-Za-z0-9\-._~+/]{16,}={0,2}/gi,
+    replace: "$1 [REDACTED]"
+  },
+  {
+    label: "secret-assignment",
+    pattern: /\b([A-Z][A-Z0-9_]{2,}(?:_KEY|_TOKEN|_SECRET|_PASSWORD|_PASSWD|_CREDENTIALS?|APIKEY|API_KEY))\s*[:=]\s*("[^"\n]*"|'[^'\n]*'|[^\s,;)"']+)/g,
+    replace: "$1=[REDACTED]"
+  },
+  {
+    label: "url-credential",
+    pattern: /\b((?:password|passwd|pwd|pass|token|api_?key)=)([^&;\s"']+)/gi,
+    replace: "$1[REDACTED]"
+  },
+  {
+    label: "connection-string",
+    pattern: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp|mssql):\/\/[^\s"'@/:]+:[^\s"'@]*@/g,
+    replace: "[REDACTED-connstring]@"
+  },
+  {
+    label: "email",
+    pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g
+  }
+];
+function redactText(text, opts = {}) {
+  let out = text;
+  const patterns = opts.extra?.length ? [...BUILTIN_REDACT_PATTERNS, ...opts.extra.map((p) => ({ label: "custom", pattern: p }))] : BUILTIN_REDACT_PATTERNS;
+  for (const { label, pattern, replace } of patterns) {
+    out = out.replace(pattern, replace ?? `${PLACEHOLDER}:${label}]`);
+  }
+  return out;
+}
+function redactState(state, opts = {}) {
+  return walk(state, 0, opts);
+}
+function walk(value, depth, opts) {
+  if (typeof value === "string")
+    return redactText(value, opts);
+  if (value === null || typeof value !== "object")
+    return value;
+  if (depth >= (opts.maxDepth ?? 12))
+    return value;
+  if (Array.isArray(value))
+    return value.map((v) => walk(v, depth + 1, opts));
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    out[k] = walk(v, depth + 1, opts);
+  }
+  return out;
+}
+
 // ../core/dist/client.js
 var DEFAULT_TIMEOUT_MS = 15e3;
 var DEFAULT_MAX_ATTEMPTS = 3;
@@ -34,7 +104,8 @@ function resolveConfig(config) {
     timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     maxAttempts: Math.max(1, config.maxAttempts ?? DEFAULT_MAX_ATTEMPTS),
     fetchImpl: config.fetchImpl ?? fetch,
-    onRetry: config.onRetry
+    onRetry: config.onRetry,
+    redact: config.redact
   };
 }
 var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -68,7 +139,16 @@ async function askJev(config, state, questions, signal) {
   if (state === void 0 || state === null) {
     throw new JevError("state is required", { retryable: false });
   }
-  const body = JSON.stringify({ model: cfg.model, state, questions });
+  let effectiveState = state;
+  if (cfg.redact) {
+    const opts = cfg.redact === true ? {} : cfg.redact;
+    try {
+      effectiveState = redactState(state, opts);
+    } catch {
+      effectiveState = state;
+    }
+  }
+  const body = JSON.stringify({ model: cfg.model, state: effectiveState, questions });
   let lastError = null;
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     if (signal?.aborted) {

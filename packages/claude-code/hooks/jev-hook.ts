@@ -25,6 +25,7 @@
  * - JEV_SKILL_CONFIDENCE    skill advisory bar (optional, default 0.5)
  * - JEV_SKILLS_JSON         inline JSON array of { name, description }
  * - JEV_SKILLS_FILE         path to a JSON file with the same shape
+ * - JEV_REDACT              "0" disables state redaction (default: on)
  */
 import { readFileSync, writeSync } from "node:fs";
 import { judgeDestructive, routeSkill, type JevConfig, type SkillCandidate } from "@jev-harness/core";
@@ -41,11 +42,12 @@ import {
 function buildConfig(): JevConfig | null {
   const apiKey = process.env.TYPESAFE_API_KEY;
   if (!apiKey) return null;
-  const config: JevConfig = { apiKey };
+  const config: JevConfig = { apiKey, redact: true };
   if (process.env.TYPESAFE_BASE_URL) config.baseUrl = process.env.TYPESAFE_BASE_URL;
   if (process.env.TYPESAFE_DEFAULT_MODEL) config.model = process.env.TYPESAFE_DEFAULT_MODEL;
   const timeoutMs = parseNumber(process.env.JEV_TIMEOUT_MS, NaN);
   if (Number.isFinite(timeoutMs) && timeoutMs > 0) config.timeoutMs = timeoutMs;
+  if ((process.env.JEV_REDACT ?? "").trim() === "0") delete config.redact;
   return config;
 }
 

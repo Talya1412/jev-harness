@@ -18,7 +18,7 @@ export const SKILL_MIN_CONFIDENCE = 0.5;
 export type Env = Record<string, string | undefined>;
 
 /** Read the Jev client config from the environment, or throw when unkeyed. */
-export function readConfig(env: Env, modelOverride?: string): JevConfig {
+export function readConfig(env: Env, modelOverride?: string, redact?: boolean): JevConfig {
   const apiKey = (env.TYPESAFE_API_KEY ?? "").trim();
   if (!apiKey) {
     throw new Error(
@@ -35,7 +35,22 @@ export function readConfig(env: Env, modelOverride?: string): JevConfig {
     baseUrl: (env.TYPESAFE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ""),
     model: (modelOverride ?? "").trim() || env.TYPESAFE_DEFAULT_MODEL || DEFAULT_MODEL,
     timeoutMs,
+    redact,
   };
+}
+
+/**
+ * Redaction policy. Hooks (gate, skill router, compaction) redact by default:
+ * their state carries tool input and history that routinely embeds secrets.
+ * The `jev_ask` tool keeps full fidelity by default — the model chose that
+ * state deliberately. `OMP_JEV_REDACT=1` turns redaction on everywhere,
+ * `OMP_JEV_REDACT=0` off everywhere.
+ */
+export function redactOn(env: Env, context: "hook" | "tool"): boolean {
+  const raw = (env.OMP_JEV_REDACT ?? "").trim();
+  if (raw === "0") return false;
+  if (raw === "1") return true;
+  return context === "hook";
 }
 
 /** Master switch (`OMP_JEV_AUTO=1`) plus a per-hook off-switch: setting the named variable to "0" disables that one hook without touching the others. */

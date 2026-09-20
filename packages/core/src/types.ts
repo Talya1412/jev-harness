@@ -77,6 +77,12 @@ export interface JevConfig {
   fetchImpl?: typeof fetch;
   /** Called on each retry with the attempt number and the error. */
   onRetry?: (attempt: number, error: Error) => void;
+  /**
+   * Redact likely secrets and direct identifiers (AWS keys, tokens, emails,
+   * connection strings) from `state` before sending. `true` applies the
+   * built-in patterns; pass a RedactOptions object to add extras. Default off.
+   */
+  redact?: boolean | import("./redact.js").RedactOptions;
 }
 
 export class JevError extends Error {
