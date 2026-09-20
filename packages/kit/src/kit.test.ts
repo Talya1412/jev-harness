@@ -1,4 +1,4 @@
-import { afterEach, describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { resolveEnvConfig } from "./config.js";
 import { okResult, errorResult, errorText } from "./results.js";
 import { createJevToolkit } from "./toolkit.js";
@@ -7,9 +7,12 @@ import type { JevResponse } from "@jev-harness/core";
 
 const ENV_KEYS = ["TYPESAFE_API_KEY", "TYPESAFE_BASE_URL", "TYPESAFE_DEFAULT_MODEL", "JEV_TIMEOUT_MS"] as const;
 
-afterEach(() => {
+// Sanitize around every test: the host machine may legitimately export these.
+function clearEnv() {
   for (const k of ENV_KEYS) delete process.env[k];
-});
+}
+beforeEach(clearEnv);
+afterEach(clearEnv);
 
 describe("resolveEnvConfig", () => {
   it("returns defaults with no env", () => {

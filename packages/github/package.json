@@ -1,36 +1,28 @@
 {
-  "name": "@jev-harness/eval",
+  "name": "@jev-harness/github",
   "version": "0.1.0",
-  "description": "Evaluation and calibration toolkit for TypeSafe's Jev (System One) decision model.",
+  "description": "GitHub Action: a Jev-driven PR review that routes reviewers and flags destructive changes.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=20"
   },
-  "bin": {
-    "jev-eval": "./dist/bin.js",
-    "jev-tune": "./dist/tune-bin.js"
-  },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/review.js",
+  "types": "./dist/review.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./cli": {
-      "types": "./dist/cli.d.ts",
-      "import": "./dist/cli.js"
+      "types": "./dist/review.d.ts",
+      "import": "./dist/review.js"
     }
   },
   "files": [
     "dist",
+    "action.yml",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
@@ -46,9 +38,9 @@
     "jev",
     "typesafe",
     "system-one",
-    "evaluation",
-    "calibration",
-    "metrics",
-    "benchmark"
+    "github-action",
+    "pull-request",
+    "review",
+    "routing"
   ]
 }
