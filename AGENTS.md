@@ -8,7 +8,11 @@ it never emits prose. See @README.md for primitives and patterns.
 
 - @packages/core — harness-agnostic client + patterns (`routeSkill`,
   `judgeDestructive` @ threshold 0.75, `chooseBrowserAction`, `pickTool`,
-  `rankCandidates`). No framework imports. Built first; every adapter imports it.
+  `rankCandidates`) and the safety/verification set (`verifyClaim`,
+  `detectPromptInjection`, `needsMoreContext`, `judgeRegression`,
+  `triageUrgency`, `chooseSubagent`, `debateJudge`) plus transport infra
+  (`withCache`, `jevBatch`, `withAudit`/`createAuditLog`, `localRouteSkill`).
+  No framework imports. Built first; every adapter imports it.
 - @packages/omp — OMP extension (5 tools + 3 hooks). Ships self-contained
   @packages/omp/bundle/extension.js via @packages/omp/scripts/bundle.mjs.
 - @packages/mcp — MCP server over stdio (7 tools), run via `jev-harness-mcp` bin.
@@ -17,6 +21,14 @@ it never emits prose. See @README.md for primitives and patterns.
 - @packages/pi — Pi extension (5 tools + 2 hooks).
 - @packages/cli — `jev-gate` binary: one Jev judgment over a diff/file/stdin
   for CI and subagent gates.
+- @packages/eval — pure calibration/tuning metrics (`brierScore`, `ece`,
+  `rocAuc`, `prAuc`, `confusionMatrix`, `precisionRecallF1`) + `tune` sweep +
+  `jev-tune` CLI. No Jev calls, no I/O in the lib layer; the CLI reads
+  JSONL/JSON-array labeled data and prints best threshold + metrics.
+- @packages/github — GitHub Action (`jev-review`): composes `judgeDestructive`
+  + `triageUrgency` + `routeSkill` into an advisory PR comment. Posts via `gh`;
+  fail-open (missing key or outage never fails the run). Ships `action.yml` +
+  @packages/github/dist/action.js.
 
 ## Code Style Guidelines
 
@@ -36,11 +48,12 @@ it never emits prose. See @README.md for primitives and patterns.
   adapters resolve core from the workspace, so core must exist first.
 - Cross-workspace deps use `"*"` (claude-code pins `"^0.1.0"`); npm here
   does not use `workspace:*` syntax.
-- Committed build output: `packages/omp/bundle/extension.js` and
-  `packages/claude-code/dist/` are tracked in git (OMP's loader can't
-  resolve bare imports; Claude Code executes a .js hook). `dist/` of
-  core/mcp/omp/pi is gitignored. Commit the bundle + claude-code dist
-  whenever core or adapter sources change.
+- Committed build output: `packages/omp/bundle/extension.js`,
+  `packages/claude-code/dist/`, and `packages/github/dist/` are tracked in git
+  (OMP's loader can't resolve bare imports; Claude Code executes a .js hook;
+  GitHub Actions run `dist/action.js`). `dist/` of core/mcp/omp/pi/cli/eval is
+  gitignored. Commit the bundle + claude-code + github dist whenever core or
+  adapter sources change.
 - CI (@.github/workflows/ci.yml) runs on push to `[master, main]` +
   PRs, matrix ubuntu/windows × node 20/22/24:
   `npm ci` → build → typecheck → test.

@@ -1,6 +1,6 @@
 # jev-harness
 
-Integrations for **[TypeSafe Jev](https://typesafe.ai)** — the System One decision model — across four agent harnesses.
+Integrations for **[TypeSafe Jev](https://typesafe.ai)** — the System One decision model — across four agent harnesses, plus evaluation and CI tooling.
 
 Jev is not a chat model. You send it a `state` plus typed `questions` and it returns **calibrated probabilities** your code acts on directly. That makes it the right tool for routing, ranking, gating, and verification — anywhere you currently pay a chat model to emit JSON you immediately parse.
 
@@ -8,12 +8,14 @@ Jev is not a chat model. You send it a `state` plus typed `questions` and it ret
 
 | Package | Harness | Transport | Capabilities |
 |---|---|---|---|
-| [`@jev-harness/core`](packages/core) | — | — | Client, primitives, reusable patterns (no framework imports) |
+| [`@jev-harness/core`](packages/core) | — | — | Client, primitives, reusable patterns + transport infra (no framework imports) |
 | [`@jev-harness/omp`](packages/omp) | [Oh My Pi](https://github.com/can1357/oh-my-pi) | Extension | 5 tools + 3 hooks (incl. verbatim compaction) |
 | [`@jev-harness/mcp`](packages/mcp) | Any MCP client | MCP over stdio | 7 tools |
 | [`@jev-harness/claude-code`](packages/claude-code) | Claude Code | Plugin | PreToolUse gate + prompt skill routing |
 | [`@jev-harness/pi`](packages/pi) | Pi | Extension | 5 tools + 2 hooks |
 | [`@jev-harness/cli`](packages/cli) | CI / subagent workflows | CLI | `jev-gate` semantic acceptance gate |
+| [`@jev-harness/eval`](packages/eval) | Evaluation | CLI | `jev-tune` threshold sweep + Brier/ECE/ROC-AUC/PR-AUC metrics |
+| [`@jev-harness/github`](packages/github) | GitHub Actions | Node action | Jev-driven PR review: routes reviewer, flags destructive |
 
 ## Why Jev
 
@@ -65,6 +67,25 @@ choice(res, "route").choice; // "security"
 - **`pickTool`** — choose one tool from a candidate set and flag confirmation-worthy side effects.
 - **`rankCandidates`** — score a list of strings against a task, best-first.
 
+### Safety, verification & adjudication patterns
+
+- **`verifyClaim`** — RAG gate. Does the cited source specifically entail a generated claim? The cheapest hallucination block for retrieval pipelines.
+- **`detectPromptInjection`** — screen content before it is appended to context. Matches the append-only-injection safety rule.
+- **`needsMoreContext`** — is there enough information to act, or should the agent ask a clarifying question first?
+- **`judgeRegression`** — would this diff break a described behavior? For code-review gates.
+- **`triageUrgency`** — score an item along Low/Medium/High/Critical.
+- **`chooseSubagent`** — decide whether to delegate and to which specialist subagent, in one call.
+- **`debateJudge`** — adjudicate two competing outputs and pick the more sound one (or a tie).
+
+### Transport infrastructure
+
+All four wrap `JevConfig.fetchImpl` (or are pure functions), so they compose with every adapter without touching decision code:
+
+- **`withCache`** — memoize identical calls. noul/choice answers are deterministic for the same input, so repeat decisions in a run are free.
+- **`jevBatch`** — merge independent question-sets that share one state into a single call, splitting answers back to each caller.
+- **`withAudit` / `createAuditLog`** — append-only provenance for every Jev call, observed at the transport layer.
+- **`localRouteSkill`** — keyword-overlap fallback router for fail-open when Jev is unreachable.
+
 ## Configuration
 
 Every adapter resolves credentials the same way:
@@ -84,6 +105,21 @@ Credentials are read from the environment and never logged.
 - **Advisory, not authoritative.** Tools report a decision; code executes it. The one exception is the destructive gate, which is explicitly a veto.
 - **No mid-conversation model switching.** Measured: switching models mid-stream invalidates the provider prompt cache and cost one deployment `$19.53` across 309 requests.
 - **Append-only context injection.** Skill hints are appended to the user turn, never used to rewrite the system prefix.
+
+## Evaluation & tuning
+
+Calibration is not correctness, and thresholds are tuned in production — never validated. `@jev-harness/eval` closes that loop. Give it `(probability, outcome)` pairs from your own labeled data and it sweeps thresholds and reports the calibration metrics you need to trust a gate:
+
+```bash
+cat destructive-labels.jsonl | npx jev-tune
+# data      n=309  positives=42  (13.6%)
+# objective f1  ->  best threshold = 0.71
+# at best   precision=0.83  recall=0.90  f1=0.86
+# calibration
+#   brier   0.0914    ece 0.0731    rocAuc 0.94    prAuc 0.88
+```
+
+`--objective youden` maximizes TPR−FPR (balanced accuracy); `--json` emits machine-readable output for CI dashboards. Supports JSONL and JSON-array inputs with forgiving keys (`p`/`prediction`/`prob`, `y`/`outcome`/`label`).
 
 ## Development
 

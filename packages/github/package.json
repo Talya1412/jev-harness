@@ -1,0 +1,46 @@
+{
+  "name": "@jev-harness/github",
+  "version": "0.1.0",
+  "description": "GitHub Action: a Jev-driven PR review that routes reviewers and flags destructive changes.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/review.js",
+  "types": "./dist/review.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/review.d.ts",
+      "import": "./dist/review.js"
+    }
+  },
+  "files": [
+    "dist",
+    "action.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@jev-harness/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^5.0.1"
+  },
+  "keywords": [
+    "jev",
+    "typesafe",
+    "system-one",
+    "github-action",
+    "pull-request",
+    "review",
+    "routing"
+  ]
+}

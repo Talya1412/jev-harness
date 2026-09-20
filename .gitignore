@@ -2,13 +2,16 @@
 node_modules/
 
 # Build output. The Claude Code plugin ships its compiled hook (Claude Code
-# executes a .js file) and the OMP package ships a self-contained bundle
-# (OMP's loader cannot resolve bare imports), so neither dist/ is ignored.
+# executes a .js file), the OMP package ships a self-contained bundle
+# (OMP's loader cannot resolve bare imports), and the GitHub Action runs
+# dist/action.js (Actions require committed JS) — so none of those are
+# ignored. The rest ship their dist via "files" on publish.
 packages/core/dist/
 packages/mcp/dist/
 packages/omp/dist/
 packages/pi/dist/
 packages/cli/dist/
+packages/eval/dist/
 
 # Command Code session data
 .commandcode/
