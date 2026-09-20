@@ -1,0 +1,49 @@
+name: "Jev Gate"
+description: >-
+  Semantic acceptance gate for pull requests: one batched Jev call judges
+  whether merging the diff would destroy data/history, leak secrets, or
+  carry high risk. Advisory by default (outputs + summary); set
+  fail_on_block for a hard gate.
+branding:
+  icon: "shield"
+  color: "red"
+
+inputs:
+  github_token:
+    description: "Token for the GitHub API (diff fetch)."
+    required: false
+    default: ${{ github.token }}
+  destructive_threshold:
+    description: "P(destructive) at or above which the gate blocks."
+    required: false
+    default: "0.75"
+  secret_threshold:
+    description: "P(secret leak) at or above which the gate blocks."
+    required: false
+    default: "0.6"
+  max_diff_chars:
+    description: "Diff characters sent to Jev; Jev is text-only and larger diffs are truncated."
+    required: false
+    default: "60000"
+  fail_on_block:
+    description: 'Fail the job when the gate blocks ("true"/"false"). Default advisory.'
+    required: false
+    default: "false"
+  strict:
+    description: 'Fail the job instead of skipping when the gate cannot run ("true"/"false").'
+    required: false
+    default: "false"
+
+outputs:
+  destructive:
+    description: "Probability (0-1) that merging the diff destroys data, history, or system state."
+  secret_leak:
+    description: "Probability (0-1) that the diff embeds a real credential or secret."
+  risk:
+    description: "Probability-weighted risk score (0-4)."
+  verdict:
+    description: "block | pass"
+
+runs:
+  using: "node20"
+  main: "dist/index.js"

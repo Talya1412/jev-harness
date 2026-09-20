@@ -1,0 +1,32 @@
+{
+  "name": "@jev-harness/jev-gate-action",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitHub Action: Jev (System One) semantic acceptance gate — destructive effect, secret leak, risk.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/bundle.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@jev-harness/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.7.2"
+  },
+  "keywords": [
+    "jev",
+    "typesafe",
+    "system-one",
+    "github-action",
+    "ci",
+    "gate"
+  ]
+}
