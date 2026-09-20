@@ -6,17 +6,47 @@ Monorepo of TypeSafe Jev (System One decision model) integrations. Jev returns
 calibrated probabilities for typed questions (`noul` / `choice` / `score`) —
 it never emits prose. See @README.md for primitives and patterns.
 
-- @packages/core — harness-agnostic client + patterns (`routeSkill`,
+- @packages/core — harness-agnostic client + 21 patterns (`routeSkill`,
   `judgeDestructive` @ threshold 0.75, `chooseBrowserAction`, `pickTool`,
-  `rankCandidates`). No framework imports. Built first; every adapter imports it.
+  `rankCandidates`, safety set `verifyClaim`/`detectPromptInjection`/...,
+  devops set `commitGate`/`migrationSafety`/`testPrioritizer`/`secretLeak`/
+  `dedupeItems`/`logSeverity`) plus infra: `redact` (state scrubbing,
+  opt-in via `JevConfig.redact`), `createBudgetGuard` (rolling-window cap),
+  `createPersistentCache`/`withPersistentCache` (disk cache with hit rate),
+  `createDecisionLog`/`jsonlSink`/`decisionDigest` + `compare` flip-rate,
+  `withCache`/`jevBatch`/`withAudit`/`localRouteSkill`, `withFailMode`.
+  No framework imports. Built first; every adapter imports it.
 - @packages/omp — OMP extension (5 tools + 3 hooks). Ships self-contained
   @packages/omp/bundle/extension.js via @packages/omp/scripts/bundle.mjs.
+  Wires the budget guard (OMP_JEV_MAX_CALLS_PER_MIN, 0=off) + persistent
+  cache (OMP_JEV_CACHE_DIR, OMP_JEV_CACHE_TTL_MS) into every call via
+  `jevConfig()`; redaction on for hooks, off for jev_ask (OMP_JEV_REDACT
+  1/0 forces). Gate verdicts logged when OMP_JEV_DECISION_LOG is set.
 - @packages/mcp — MCP server over stdio (7 tools), run via `jev-harness-mcp` bin.
 - @packages/claude-code — Claude Code plugin: PreToolUse destructive gate +
   skill routing. Ships compiled @packages/claude-code/dist + @packages/claude-code/hooks.
+  Redaction on by default (JEV_REDACT=0 disables).
 - @packages/pi — Pi extension (5 tools + 2 hooks).
-- @packages/cli — `jev-gate` binary: one Jev judgment over a diff/file/stdin
-  for CI and subagent gates.
+- @packages/cli — `jev` + `jev-gate` binaries: `jev ask/models/eval` and the
+  semantic acceptance gate over a diff/file/stdin for CI and subagents.
+- @packages/eval — calibration toolkit (`jev-eval`, `jev-tune`): binary
+  metrics, reliability bins, threshold sweeps, multiclass/score metrics,
+  tune (f1/youden). Golden baseline in @packages/eval/golden (LIVE
+  recording: AUC 0.996, Brier 0.051); regression.test.ts enforces it every
+  CI run; parity.test.ts pins TS metrics to the shared fixture that
+  jev-py also asserts. Scripts: scripts/record-baseline.mjs (live
+  recording), scripts/check-regression.mjs (report vs baseline).
+- @packages/github — `jev-review` GitHub Action (advisory PR comment).
+- @packages/jev-gate-action — `jev-gate` GitHub Action: destructive +
+  secret-leak + risk on a PR diff; advisory unless fail_on_block. Bundled
+  dist/index.js committed.
+- @packages/pr-triage-action — PR triage action (auth impact, risk, route).
+- @packages/kit — shared adapter foundation (env config, envelope, router).
+- @packages/jev-py — zero-dependency Python port (async client, patterns,
+  infra, eval+tune). NOT an npm workspace; `python -m pytest packages/jev-py`
+  (pythonpath=src configured). test_parity.py shares @packages/eval/golden/
+  parity-metrics.json with packages/eval/src/parity.test.ts.
+- @packages/vscode — VS Code extension (CJS, `node --test test.js`).
 
 ## Code Style Guidelines
 
@@ -36,14 +66,21 @@ it never emits prose. See @README.md for primitives and patterns.
   adapters resolve core from the workspace, so core must exist first.
 - Cross-workspace deps use `"*"` (claude-code pins `"^0.1.0"`); npm here
   does not use `workspace:*` syntax.
-- Committed build output: `packages/omp/bundle/extension.js` and
-  `packages/claude-code/dist/` are tracked in git (OMP's loader can't
-  resolve bare imports; Claude Code executes a .js hook). `dist/` of
-  core/mcp/omp/pi is gitignored. Commit the bundle + claude-code dist
-  whenever core or adapter sources change.
+- Committed build output: `packages/omp/bundle/extension.js`,
+  `packages/claude-code/dist/`, `packages/github/dist/`,
+  `packages/pr-triage-action/dist/index.js`, and
+  `packages/jev-gate-action/dist/index.js` are tracked in git (OMP's loader
+  can't resolve bare imports; Claude Code executes a .js hook; GitHub
+  Actions run their bundled entry directly). `dist/` of
+  core/mcp/omp/pi/cli/eval/kit is gitignored. Rebuild + commit the bundle
+  and committed dists whenever core or adapter sources change.
 - CI (@.github/workflows/ci.yml) runs on push to `[master, main]` +
-  PRs, matrix ubuntu/windows × node 20/22/24:
-  `npm ci` → build → typecheck → test.
+  PRs: matrix ubuntu/windows × node 20/22/24
+  (`npm ci` → build → typecheck → test) plus a python job running
+  `pytest packages/jev-py/tests` (includes the TS parity fixture).
+  Other workflows: live-eval.yml (manual calibration run vs baseline),
+  release.yml (changesets version PR + npm publish with provenance),
+  pr-triage.yml.
 
 ## Common Workflows
 

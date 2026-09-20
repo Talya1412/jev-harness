@@ -1,5 +1,9 @@
 // Bundled by @jev-harness/omp — @jev-harness/core is inlined. Do not edit.
 
+// dist/extension.js
+import { homedir } from "node:os";
+import { join as join2 } from "node:path";
+
 // ../core/dist/types.js
 var DEFAULT_BASE_URL = "https://api.typesafe.ai";
 var DEFAULT_MODEL = "jev-latest";
@@ -352,6 +356,279 @@ async function pickTool(config, input, options = {}) {
   return { tool: picked.choice ?? null, confidence: picked.confidence, risky, confirmRequired: risky >= riskThreshold, act };
 }
 
+// ../core/dist/budget.js
+function createBudgetGuard(opts = {}) {
+  const maxPerWindow = Math.max(1, opts.maxPerWindow ?? 120);
+  const windowMs = Math.max(1, opts.windowMs ?? 6e4);
+  const maxTotal = Math.max(1, opts.maxTotal ?? Number.POSITIVE_INFINITY);
+  let timestamps = [];
+  let totalCalls = 0;
+  let rejected = 0;
+  function pruneWindow(now) {
+    const cutoff = now - windowMs;
+    while (timestamps.length > 0 && timestamps[0] < cutoff)
+      timestamps.shift();
+    return timestamps;
+  }
+  return {
+    wrap(config) {
+      const parent = config.fetchImpl ?? fetch;
+      const wrapped = async (url, init) => {
+        const now = Date.now();
+        const window = pruneWindow(now);
+        if (window.length >= maxPerWindow) {
+          rejected++;
+          opts.onLimit?.({ reason: "window", used: window.length, limit: maxPerWindow });
+          throw new JevError(`Jev budget exhausted: ${window.length} requests in the last ${windowMs}ms (limit ${maxPerWindow}). Raise maxPerWindow or wait for the window to slide.`, { retryable: false });
+        }
+        if (totalCalls >= maxTotal) {
+          rejected++;
+          opts.onLimit?.({ reason: "total", used: totalCalls, limit: maxTotal });
+          throw new JevError(`Jev budget exhausted: ${totalCalls} lifetime requests (limit ${maxTotal}). Create a new guard or raise maxTotal.`, { retryable: false });
+        }
+        window.push(now);
+        totalCalls++;
+        return parent(url, init);
+      };
+      return { ...config, fetchImpl: wrapped };
+    },
+    stats() {
+      const window = pruneWindow(Date.now());
+      return { windowCalls: window.length, totalCalls, rejected };
+    },
+    reset() {
+      timestamps = [];
+      totalCalls = 0;
+      rejected = 0;
+    }
+  };
+}
+
+// ../core/dist/decision-log.js
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+
+// ../core/dist/cache.js
+function stableStringify(value) {
+  const walk2 = (v) => {
+    if (Array.isArray(v))
+      return v.map(walk2);
+    if (v && typeof v === "object") {
+      const obj = v;
+      const out = {};
+      for (const k of Object.keys(obj).sort())
+        out[k] = walk2(obj[k]);
+      return out;
+    }
+    return v;
+  };
+  return JSON.stringify(walk2(value));
+}
+function fnv1a(input) {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+// ../core/dist/decision-log.js
+function createDecisionLog(opts = {}) {
+  const maxEntries = Math.max(1, opts.maxEntries ?? 1e3);
+  const entries = [];
+  return {
+    record(decision) {
+      entries.push(decision);
+      if (entries.length > maxEntries)
+        entries.shift();
+      try {
+        opts.sink?.(decision);
+      } catch {
+      }
+    },
+    entries() {
+      return entries;
+    },
+    get size() {
+      return entries.length;
+    },
+    compare(other) {
+      const rows = other instanceof Array ? other : other.entries();
+      const byDigest = /* @__PURE__ */ new Map();
+      for (const r of rows) {
+        if (!byDigest.has(r.digest))
+          byDigest.set(r.digest, r);
+      }
+      const disagreements = [];
+      let matched = 0;
+      let agreed = 0;
+      for (const mine of entries) {
+        const theirs = byDigest.get(mine.digest);
+        if (!theirs)
+          continue;
+        matched++;
+        let same = true;
+        for (const [id, value] of Object.entries(mine.answers)) {
+          const otherValue = theirs.answers[id];
+          if (otherValue === void 0 || otherValue !== value) {
+            same = false;
+            break;
+          }
+        }
+        if (same)
+          agreed++;
+        else
+          disagreements.push({ digest: mine.digest, kind: mine.kind, a: mine, b: theirs });
+      }
+      return { matched, agreed, flipRate: matched === 0 ? 0 : disagreements.length / matched, disagreements };
+    }
+  };
+}
+function decisionDigest(kind, state, questionIds) {
+  return fnv1a(kind + "\n" + stableStringify(state) + "\n" + [...questionIds].sort().join(","));
+}
+function jsonlSink(path) {
+  return (record) => {
+    mkdirSync(dirname(path), { recursive: true });
+    appendFileSync(path, JSON.stringify(record) + "\n", "utf8");
+  };
+}
+
+// ../core/dist/persist-cache.js
+import { existsSync, mkdirSync as mkdirSync2, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname as dirname2, join } from "node:path";
+function createPersistentCache(opts) {
+  const ttlMs = Math.max(0, opts.ttlMs ?? 24 * 60 * 60 * 1e3);
+  const maxEntries = Math.max(1, opts.maxEntries ?? 512);
+  const path = join(opts.dir, opts.file ?? "jev-cache.json");
+  let entries = /* @__PURE__ */ new Map();
+  let nextSeq = 1;
+  let loaded = false;
+  const hits = { hits: 0, misses: 0 };
+  function load() {
+    if (loaded)
+      return;
+    loaded = true;
+    if (!existsSync(path))
+      return;
+    try {
+      const doc = JSON.parse(readFileSync(path, "utf8"));
+      if (!doc || doc.version !== 1 || typeof doc.entries !== "object")
+        return;
+      const now = Date.now();
+      const rows = Object.entries(doc.entries);
+      rows.sort((a, b) => a[1].seq - b[1].seq);
+      for (const [key, entry] of rows) {
+        if (typeof entry?.expiresAt === "number" && entry.expiresAt > now && entry.response) {
+          entries.set(key, { response: entry.response, expiresAt: entry.expiresAt, seq: entry.seq });
+          nextSeq = Math.max(nextSeq, entry.seq + 1);
+        }
+      }
+    } catch {
+      entries = /* @__PURE__ */ new Map();
+    }
+  }
+  function flush() {
+    try {
+      mkdirSync2(dirname2(path), { recursive: true });
+      const doc = { version: 1, nextSeq, entries: Object.fromEntries(entries) };
+      const tmp = path + ".tmp";
+      writeFileSync(tmp, JSON.stringify(doc), "utf8");
+      renameSync(tmp, path);
+    } catch {
+    }
+  }
+  function evictIfNeeded() {
+    while (entries.size >= maxEntries) {
+      let oldestKey = null;
+      let oldestSeq = Number.POSITIVE_INFINITY;
+      for (const [key, entry] of entries) {
+        if (entry.seq < oldestSeq) {
+          oldestSeq = entry.seq;
+          oldestKey = key;
+        }
+      }
+      if (oldestKey === null)
+        break;
+      entries.delete(oldestKey);
+    }
+  }
+  return {
+    get(key) {
+      load();
+      const entry = entries.get(key);
+      if (!entry) {
+        hits.misses++;
+        return void 0;
+      }
+      if (Date.now() >= entry.expiresAt) {
+        entries.delete(key);
+        hits.misses++;
+        return void 0;
+      }
+      hits.hits++;
+      return entry.response;
+    },
+    set(key, response) {
+      load();
+      evictIfNeeded();
+      entries.set(key, { response, expiresAt: Date.now() + ttlMs, seq: nextSeq++ });
+      flush();
+    },
+    delete(key) {
+      load();
+      entries.delete(key);
+      flush();
+    },
+    clear() {
+      load();
+      entries = /* @__PURE__ */ new Map();
+      nextSeq = 1;
+      flush();
+    },
+    get size() {
+      load();
+      return entries.size;
+    },
+    stats() {
+      const total = hits.hits + hits.misses;
+      return { ...hits, hitRate: total === 0 ? 0 : hits.hits / total };
+    },
+    flush
+  };
+}
+function withPersistentCache(config, cache) {
+  const parent = config.fetchImpl ?? fetch;
+  const wrapped = async (url, init) => {
+    const target = String(url);
+    if (!target.endsWith("/v1/systemone") || init?.method?.toUpperCase() !== "POST") {
+      return parent(url, init);
+    }
+    const key = target + "\n" + String(init.body ?? "");
+    try {
+      const hit = cache.get(key);
+      if (hit) {
+        return new Response(JSON.stringify(hit), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+    } catch {
+      return parent(url, init);
+    }
+    const res = await parent(url, init);
+    if (res.ok) {
+      try {
+        cache.set(key, await res.clone().json());
+      } catch {
+      }
+    }
+    return res;
+  };
+  return { ...config, fetchImpl: wrapped };
+}
+
 // dist/config.js
 var DEFAULT_TIMEOUT_MS2 = 15e3;
 var GATE_THRESHOLD = 0.75;
@@ -590,6 +867,20 @@ function jevAsker(cfg) {
 
 // dist/extension.js
 var ENV = process.env;
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var maxPerMin = envNum(ENV, "OMP_JEV_MAX_CALLS_PER_MIN", 120);
+var guard = maxPerMin > 0 ? createBudgetGuard({ maxPerWindow: maxPerMin, windowMs: 6e4 }) : null;
+var persistentCache = createPersistentCache({
+  dir: (ENV.OMP_JEV_CACHE_DIR ?? "").trim() || join2(homedir(), ".omp", "cache", "jev-harness"),
+  ttlMs: envNum(ENV, "OMP_JEV_CACHE_TTL_MS", DAY_MS)
+});
+function jevConfig(modelOverride, redact) {
+  let cfg = readConfig(ENV, modelOverride, redact);
+  if (guard)
+    cfg = guard.wrap(cfg);
+  return withPersistentCache(cfg, persistentCache);
+}
+var gateLog = createDecisionLog((ENV.OMP_JEV_DECISION_LOG ?? "").trim() ? { sink: jsonlSink((ENV.OMP_JEV_DECISION_LOG ?? "").trim()) } : {});
 function jevExtension(pi) {
   const z = pi.zod;
   const questionSchema = z.object({
@@ -609,7 +900,7 @@ function jevExtension(pi) {
     loadMode: "essential",
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig(ENV, params.model, redactOn(ENV, "tool"));
+      const cfg = jevConfig(params.model, redactOn(ENV, "tool"));
       const result = await askJev(cfg, params.state, params.questions, signal ?? void 0);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -625,7 +916,7 @@ function jevExtension(pi) {
     loadMode: "essential",
     approval: "read",
     async execute(_id, _params, _signal) {
-      const cfg = readConfig(ENV);
+      const cfg = jevConfig();
       const models = await listJevModels(cfg);
       const text = JSON.stringify(models, null, 2);
       return { content: [{ type: "text", text }], details: { models } };
@@ -642,7 +933,7 @@ function jevExtension(pi) {
     }),
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig(ENV, void 0, redactOn(ENV, "tool"));
+      const cfg = jevConfig(void 0, redactOn(ENV, "tool"));
       const result = await routeSkill(cfg, params.task, params.skills.map((name) => ({ name })), { signal: signal ?? void 0 });
       const hint = result.skill !== null ? "Consider loading skill: " + result.skill : "No listed skill is relevant.";
       return {
@@ -670,7 +961,7 @@ function jevExtension(pi) {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig(ENV, void 0, redactOn(ENV, "tool"));
+      const cfg = jevConfig(void 0, redactOn(ENV, "tool"));
       const result = await chooseBrowserAction(cfg, {
         goal: params.goal,
         page: params.page,
@@ -703,7 +994,7 @@ function jevExtension(pi) {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig(ENV, void 0, redactOn(ENV, "tool"));
+      const cfg = jevConfig(void 0, redactOn(ENV, "tool"));
       const result = await pickTool(cfg, { task: params.task, tools: params.tools, context: params.context }, { signal: signal ?? void 0 });
       const out = {
         tool: result.tool,
@@ -725,8 +1016,19 @@ function jevExtension(pi) {
       const name = String(event?.toolName ?? "");
       if (!/^(bash|write|edit|delete|move|rm|mcp__)/i.test(name))
         return;
-      const cfg = readConfig(ENV, void 0, redactOn(ENV, "hook"));
+      const cfg = jevConfig(void 0, redactOn(ENV, "hook"));
+      const startedAt = Date.now();
       const verdict = await judgeDestructive(cfg, { tool: name, input: event?.input ?? {}, cwd: process.cwd() }, { threshold: GATE_THRESHOLD });
+      gateLog.record({
+        ts: (/* @__PURE__ */ new Date()).toISOString(),
+        kind: "omp_gate",
+        model: cfg.model ?? "unknown",
+        digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, ["destructive"]),
+        answers: { destructive: verdict.destructive },
+        threshold: GATE_THRESHOLD,
+        action: verdict.blocked ? "block" : "allow",
+        latencyMs: Date.now() - startedAt
+      });
       if (verdict.blocked) {
         return {
           block: true,
@@ -776,7 +1078,7 @@ function jevExtension(pi) {
       for (const s of roster) {
         byName.set(s.name, s.description.replace(/\s+/g, " ").slice(0, 180));
       }
-      const cfg = readConfig(ENV, void 0, redactOn(ENV, "hook"));
+      const cfg = jevConfig(void 0, redactOn(ENV, "hook"));
       const result = await routeSkill(cfg, text, shortlist.map((name) => ({ name, description: byName.get(name) ?? "" })), { minConfidence: SKILL_MIN_CONFIDENCE, maxCandidates: 12 });
       if (result.skill !== null) {
         return { additionalContext: "[jev] Consider loading skill: " + result.skill };
@@ -803,7 +1105,7 @@ function jevExtension(pi) {
         truncateHeadChars: envNum(ENV, "OMP_JEV_TRUNCATE_HEAD", COMPACT_DEFAULTS.truncateHeadChars),
         minReductionRatio: envNum(ENV, "OMP_JEV_MIN_REDUCTION", COMPACT_DEFAULTS.minReductionRatio)
       };
-      const cfg = readConfig(ENV, void 0, redactOn(ENV, "hook"));
+      const cfg = jevConfig(void 0, redactOn(ENV, "hook"));
       const outcome = await planCompaction({
         region: [...prep.messagesToSummarize ?? [], ...prep.turnPrefixMessages ?? []],
         ask: jevAsker(cfg),
