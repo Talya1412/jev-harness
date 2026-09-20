@@ -670,14 +670,14 @@ function jevExtension(pi) {
       const lower = text.toLowerCase();
       const scored = roster.map((s) => {
         const parts = s.name.toLowerCase().split(/[-_]/);
-        let score = 0;
+        let score2 = 0;
         for (const part of parts) {
           if (part.length > 3 && lower.includes(part))
-            score += 2;
+            score2 += 2;
           if (part.length <= 4 && lower.includes(part))
-            score += 1;
+            score2 += 1;
         }
-        return { name: s.name, score };
+        return { name: s.name, score: score2 };
       });
       const lexical = scored.filter((x) => x.score > 0).map((x) => x.name);
       const shortlist = (lexical.length > 0 ? lexical : roster.map((s) => s.name)).slice(0, 12);

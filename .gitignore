@@ -25,6 +25,13 @@ coverage/
 *.log
 .DS_Store
 
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+
 # Secrets. The template .env.example IS committed so users know what to set.
 .env
 .env.*

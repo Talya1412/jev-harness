@@ -110,6 +110,28 @@ export function ece(pairs: BinaryPair[], bins = 10): number {
   );
 }
 
+/**
+ * PR AUC as average precision: sum of precision-at-hit over positives,
+ * divided by the positive count. null when there are no positives.
+ */
+export function prAuc(pairs: BinaryPair[]): number | null {
+  const pos = pairs.filter((x) => x.y === 1).length;
+  if (pos === 0) return null;
+  const sorted = [...pairs].sort((a, b) => b.p - a.p);
+  let tp = 0;
+  let fp = 0;
+  let ap = 0;
+  for (const { y } of sorted) {
+    if (y === 1) {
+      tp++;
+      ap += tp / (tp + fp);
+    } else {
+      fp++;
+    }
+  }
+  return ap / pos;
+}
+
 export interface SweepRow {
   threshold: number;
   tp: number;
