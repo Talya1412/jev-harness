@@ -73,7 +73,7 @@ All five tools fail open: Jev errors resolve to advisory text, never throw.
   descriptions, not bare names.
 - `jev_pick_tool` — pick one tool (or none), with a confirmation flag for
   side-effecting choices. Does not execute anything.
-- `jev_browse_goal` — pick the next browser operation from a page snapshot.
+- `jev_browse_action` — pick the next browser operation from a page snapshot.
   Does not execute anything.
 
 ## Hooks

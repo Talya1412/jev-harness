@@ -26,7 +26,7 @@ The `package.json` `omp.extensions` field points at `./dist/extension.js`.
 | `jev_ask` | Typed noul/choice/score questions over an arbitrary state. Returns the raw Jev response (JSON + details). |
 | `jev_models` | Lists the System One models available to the key. |
 | `jev_route_skills` | Ranks skill names against a task via `routeSkill` (core). Advisory hint, never loads anything. |
-| `jev_browse_goal` | Picks the next browser action from a page snapshot via `chooseBrowserAction` (core). Advisory — validates nothing, executes nothing. |
+| `jev_browse_action` | Picks the next browser action from a page snapshot via `chooseBrowserAction` (core). Advisory — validates nothing, executes nothing. |
 | `jev_pick_tool` | Picks one tool for a task + flags confirmation via `pickTool` (core). Advisory — executes nothing. |
 
 ## Hooks (all require `OMP_JEV_AUTO=1`)

@@ -2,7 +2,7 @@
  * @jev-harness/pi - TypeSafe Jev (System One) judgments as a Pi extension.
  *
  * Registers five fail-open tools (jev_ask, jev_models, jev_route_skills,
- * jev_pick_tool, jev_browse_goal) plus two hooks:
+ * jev_pick_tool, jev_browse_action) plus two hooks:
  * - session_before_compact: verbatim compaction driven by two noul
  *   judgments per tool call/result pair.
  * - input: append-only skill-router advisory (never blocks or rewrites).
@@ -267,7 +267,7 @@ export default function jevPi(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
-    name: "jev_browse_goal",
+    name: "jev_browse_action",
     label: "Jev browse goal",
     description:
       "Pick the single next browser operation that best advances a goal, " +
@@ -327,7 +327,7 @@ export default function jevPi(pi: ExtensionAPI): void {
         );
         return ok(JSON.stringify(result, null, 2), result);
       } catch (err) {
-        return ok(errorText("jev_browse_goal", err));
+        return ok(errorText("jev_browse_action", err));
       }
     },
   });

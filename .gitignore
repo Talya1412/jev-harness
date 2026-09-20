@@ -1,9 +1,20 @@
+# Dependencies
 node_modules/
+
+# Build output is ignored by default, except the two artifacts that MUST ship:
+#   - the Claude Code plugin's compiled hook (Claude Code executes a .js file)
+#   - the OMP package's self-contained bundle (OMP cannot resolve bare imports)
 dist/
+bundle/
+!packages/claude-code/dist/
+!packages/omp/bundle/
+
 *.tsbuildinfo
-.env
-.env.*
-__omp_shell(".env.example")
 coverage/
 *.log
 .DS_Store
+
+# Secrets. The template .env.example IS committed so users know what to set.
+.env
+.env.*
+!.env.example

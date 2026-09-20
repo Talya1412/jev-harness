@@ -274,7 +274,7 @@ var SKILL_MIN_CONFIDENCE = 0.5;
 function readConfig(modelOverride) {
   const apiKey = (process.env.TYPESAFE_API_KEY ?? "").trim();
   if (!apiKey) {
-    throw new Error("TYPESAFE_API_KEY is not set. Add it to ~/.omp/agent/.env or export it before launching omp.");
+    throw new Error("TYPESAFE_API_KEY is not set. Export it in your shell or add it to your harness env file.");
   }
   const timeoutRaw = (process.env.JEV_TIMEOUT_MS ?? "").trim();
   const timeoutMs = timeoutRaw !== "" && Number.isFinite(Number(timeoutRaw)) ? Number(timeoutRaw) : DEFAULT_TIMEOUT_MS2;
@@ -357,7 +357,7 @@ function jevExtension(pi) {
     }
   });
   pi.registerTool({
-    name: "jev_browse_goal",
+    name: "jev_browse_action",
     label: "Jev Browse Goal",
     description: "Given a goal and a numbered element table from a page snapshot, ask Jev to pick the single next browser action. Returns the operation plus the chosen target. ADVISORY: this tool does not execute anything \u2014 validate the returned index against the live snapshot and act in code.",
     parameters: z.object({

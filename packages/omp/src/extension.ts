@@ -9,7 +9,7 @@
  * - 'jev_ask': typed noul/choice/score questions over an arbitrary state.
  * - 'jev_models': list the System One models available to the key.
  * - 'jev_route_skills': rank the skill roster against a task (advisory).
- * - 'jev_browse_goal': pick the next browser action from a snapshot (advisory).
+ * - 'jev_browse_action': pick the next browser action from a snapshot (advisory).
  * - 'jev_pick_tool': pick one tool for a task + flag confirmation (advisory).
  *
  * Hooks (all require 'OMP_JEV_AUTO=1', each with its own off-switch):
@@ -43,7 +43,7 @@ function readConfig(modelOverride?: string): JevConfig {
   const apiKey = (process.env.TYPESAFE_API_KEY ?? "").trim();
   if (!apiKey) {
     throw new Error(
-      "TYPESAFE_API_KEY is not set. Add it to ~/.omp/agent/.env or export it before launching omp."
+      "TYPESAFE_API_KEY is not set. Export it in your shell or add it to your harness env file."
     );
   }
   const timeoutRaw = (process.env.JEV_TIMEOUT_MS ?? "").trim();
@@ -164,7 +164,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
-    name: "jev_browse_goal",
+    name: "jev_browse_action",
     label: "Jev Browse Goal",
     description:
       "Given a goal and a numbered element table from a page snapshot, ask Jev to pick the single next browser action. " +

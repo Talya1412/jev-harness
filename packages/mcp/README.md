@@ -39,14 +39,14 @@ export TYPESAFE_API_KEY=...
 ## Claude Code
 
 ```sh
-claude mcp add jev-harness-mcp -e TYPESAFE_API_KEY=... -- node C:/tmp/jev-harness/packages/mcp/dist/index.js
+claude mcp add jev-harness-mcp -e TYPESAFE_API_KEY=... -- node <repo>/packages/mcp/dist/index.js
 ```
 
 ## Cursor
 
 Settings > MCP > New Global MCP Server (stdio command):
 
-- Command: `node C:/tmp/jev-harness/packages/mcp/dist/index.js`
+- Command: `node <repo>/packages/mcp/dist/index.js`
 - Env: `TYPESAFE_API_KEY=...`
 
 ## Generic mcpServers JSON (Windsurf, Cline, Codex, ...)
@@ -56,7 +56,7 @@ Settings > MCP > New Global MCP Server (stdio command):
   "mcpServers": {
     "jev-harness": {
       "command": "node",
-      "args": ["C:/tmp/jev-harness/packages/mcp/dist/index.js"],
+      "args": ["<repo>/packages/mcp/dist/index.js"],
       "env": { "TYPESAFE_API_KEY": "..." }
     }
   }
