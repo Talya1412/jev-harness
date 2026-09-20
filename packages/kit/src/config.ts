@@ -35,6 +35,9 @@ export function resolveEnvConfig(opts: ResolveEnvConfigOptions = {}): JevConfig 
     apiKey,
     baseUrl: ((process.env.TYPESAFE_BASE_URL ?? "").trim() || DEFAULT_BASE_URL).replace(/\/+$/, ""),
     model: (opts.modelOverride ?? "").trim() || (process.env.TYPESAFE_DEFAULT_MODEL ?? "").trim() || DEFAULT_MODEL,
+    // Adapters built on the kit send tool input and history as state; redaction
+    // is on unless JEV_REDACT=0.
+    redact: (process.env.JEV_REDACT ?? "").trim() !== "0",
   };
   const timeoutMs = parseTimeoutMs(process.env.JEV_TIMEOUT_MS);
   if (timeoutMs !== undefined) config.timeoutMs = timeoutMs;

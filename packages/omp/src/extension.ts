@@ -30,7 +30,7 @@ import {
   routeSkill,
   type Questions,
 } from "@jev-harness/core";
-import { GATE_THRESHOLD, SKILL_MIN_CONFIDENCE, autoOn, envNum, readConfig } from "./config.js";
+import { GATE_THRESHOLD, SKILL_MIN_CONFIDENCE, autoOn, envNum, readConfig, redactOn } from "./config.js";
 import { COMPACT_DEFAULTS, jevAsker, planCompaction, type CompactDefaults } from "./compact.js";
 import { MIN_PROMPT_CHARS, candidatePayload, shortlistSkills, type SkillCandidate } from "./skills.js";
 
@@ -70,7 +70,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     loadMode: "essential",
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig(ENV, params.model);
+      const cfg = readConfig(ENV, params.model, redactOn(ENV, "tool"));
       const result = await askJev(cfg, params.state, params.questions as unknown as Questions, signal ?? undefined);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -108,7 +108,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     }),
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, undefined, redactOn(ENV, "tool"));
       const result = await routeSkill(
         cfg,
         params.task,
@@ -148,7 +148,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, undefined, redactOn(ENV, "tool"));
       const result = await chooseBrowserAction(
         cfg,
         {
@@ -188,7 +188,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, undefined, redactOn(ENV, "tool"));
       const result = await pickTool(
         cfg,
         { task: params.task, tools: params.tools, context: params.context },
@@ -221,7 +221,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
       const name = String(event?.toolName ?? "");
       // Only adjudicate tools that can mutate the world; cheap reads skip the call.
       if (!/^(bash|write|edit|delete|move|rm|mcp__)/i.test(name)) return;
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, undefined, redactOn(ENV, "hook"));
       const verdict = await judgeDestructive(
         cfg,
         { tool: name, input: event?.input ?? {}, cwd: process.cwd() },
@@ -288,7 +288,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
       for (const s of roster) {
         byName.set(s.name, s.description.replace(/\s+/g, " ").slice(0, 180));
       }
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, undefined, redactOn(ENV, "hook"));
       const result = await routeSkill(
         cfg,
         text,
@@ -333,7 +333,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
         minReductionRatio: envNum(ENV, "OMP_JEV_MIN_REDUCTION", COMPACT_DEFAULTS.minReductionRatio),
       };
 
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, undefined, redactOn(ENV, "hook"));
       const outcome = await planCompaction({
         region: [...(prep.messagesToSummarize ?? []), ...(prep.turnPrefixMessages ?? [])],
         ask: jevAsker(cfg),

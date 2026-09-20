@@ -16,6 +16,76 @@ var JevError = class extends Error {
   }
 };
 
+// ../core/dist/redact.js
+var PLACEHOLDER = "[REDACTED";
+var BUILTIN_REDACT_PATTERNS = [
+  { label: "aws-access-key", pattern: /\bAKIA[0-9A-Z]{16}\b/g },
+  {
+    label: "jwt",
+    pattern: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g
+  },
+  {
+    label: "private-key",
+    pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g
+  },
+  {
+    label: "github-token",
+    pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})\b/g
+  },
+  { label: "slack-token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g },
+  { label: "api-key", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
+  {
+    label: "auth-header",
+    pattern: /\b(Bearer|Basic)\s+[A-Za-z0-9\-._~+/]{16,}={0,2}/gi,
+    replace: "$1 [REDACTED]"
+  },
+  {
+    label: "secret-assignment",
+    pattern: /\b([A-Z][A-Z0-9_]{2,}(?:_KEY|_TOKEN|_SECRET|_PASSWORD|_PASSWD|_CREDENTIALS?|APIKEY|API_KEY))\s*[:=]\s*("[^"\n]*"|'[^'\n]*'|[^\s,;)"']+)/g,
+    replace: "$1=[REDACTED]"
+  },
+  {
+    label: "url-credential",
+    pattern: /\b((?:password|passwd|pwd|pass|token|api_?key)=)([^&;\s"']+)/gi,
+    replace: "$1[REDACTED]"
+  },
+  {
+    label: "connection-string",
+    pattern: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp|mssql):\/\/[^\s"'@/:]+:[^\s"'@]*@/g,
+    replace: "[REDACTED-connstring]@"
+  },
+  {
+    label: "email",
+    pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g
+  }
+];
+function redactText(text, opts = {}) {
+  let out = text;
+  const patterns = opts.extra?.length ? [...BUILTIN_REDACT_PATTERNS, ...opts.extra.map((p) => ({ label: "custom", pattern: p }))] : BUILTIN_REDACT_PATTERNS;
+  for (const { label, pattern, replace } of patterns) {
+    out = out.replace(pattern, replace ?? `${PLACEHOLDER}:${label}]`);
+  }
+  return out;
+}
+function redactState(state, opts = {}) {
+  return walk(state, 0, opts);
+}
+function walk(value, depth, opts) {
+  if (typeof value === "string")
+    return redactText(value, opts);
+  if (value === null || typeof value !== "object")
+    return value;
+  if (depth >= (opts.maxDepth ?? 12))
+    return value;
+  if (Array.isArray(value))
+    return value.map((v) => walk(v, depth + 1, opts));
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    out[k] = walk(v, depth + 1, opts);
+  }
+  return out;
+}
+
 // ../core/dist/client.js
 var DEFAULT_TIMEOUT_MS = 15e3;
 var DEFAULT_MAX_ATTEMPTS = 3;
@@ -31,7 +101,8 @@ function resolveConfig(config) {
     timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     maxAttempts: Math.max(1, config.maxAttempts ?? DEFAULT_MAX_ATTEMPTS),
     fetchImpl: config.fetchImpl ?? fetch,
-    onRetry: config.onRetry
+    onRetry: config.onRetry,
+    redact: config.redact
   };
 }
 var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -65,7 +136,16 @@ async function askJev(config, state, questions, signal) {
   if (state === void 0 || state === null) {
     throw new JevError("state is required", { retryable: false });
   }
-  const body = JSON.stringify({ model: cfg.model, state, questions });
+  let effectiveState = state;
+  if (cfg.redact) {
+    const opts = cfg.redact === true ? {} : cfg.redact;
+    try {
+      effectiveState = redactState(state, opts);
+    } catch {
+      effectiveState = state;
+    }
+  }
+  const body = JSON.stringify({ model: cfg.model, state: effectiveState, questions });
   let lastError = null;
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     if (signal?.aborted) {
@@ -276,7 +356,7 @@ async function pickTool(config, input, options = {}) {
 var DEFAULT_TIMEOUT_MS2 = 15e3;
 var GATE_THRESHOLD = 0.75;
 var SKILL_MIN_CONFIDENCE = 0.5;
-function readConfig(env, modelOverride) {
+function readConfig(env, modelOverride, redact) {
   const apiKey = (env.TYPESAFE_API_KEY ?? "").trim();
   if (!apiKey) {
     throw new Error("TYPESAFE_API_KEY is not set. Export it in your shell or add it to your harness env file.");
@@ -287,8 +367,17 @@ function readConfig(env, modelOverride) {
     apiKey,
     baseUrl: (env.TYPESAFE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ""),
     model: (modelOverride ?? "").trim() || env.TYPESAFE_DEFAULT_MODEL || DEFAULT_MODEL,
-    timeoutMs
+    timeoutMs,
+    redact
   };
+}
+function redactOn(env, context) {
+  const raw = (env.OMP_JEV_REDACT ?? "").trim();
+  if (raw === "0")
+    return false;
+  if (raw === "1")
+    return true;
+  return context === "hook";
 }
 function autoOn(env, name) {
   return (env.OMP_JEV_AUTO ?? "").trim() === "1" && (env[name] ?? "1").trim() !== "0";
@@ -520,7 +609,7 @@ function jevExtension(pi) {
     loadMode: "essential",
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig(ENV, params.model);
+      const cfg = readConfig(ENV, params.model, redactOn(ENV, "tool"));
       const result = await askJev(cfg, params.state, params.questions, signal ?? void 0);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -553,7 +642,7 @@ function jevExtension(pi) {
     }),
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, void 0, redactOn(ENV, "tool"));
       const result = await routeSkill(cfg, params.task, params.skills.map((name) => ({ name })), { signal: signal ?? void 0 });
       const hint = result.skill !== null ? "Consider loading skill: " + result.skill : "No listed skill is relevant.";
       return {
@@ -581,7 +670,7 @@ function jevExtension(pi) {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, void 0, redactOn(ENV, "tool"));
       const result = await chooseBrowserAction(cfg, {
         goal: params.goal,
         page: params.page,
@@ -614,7 +703,7 @@ function jevExtension(pi) {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, void 0, redactOn(ENV, "tool"));
       const result = await pickTool(cfg, { task: params.task, tools: params.tools, context: params.context }, { signal: signal ?? void 0 });
       const out = {
         tool: result.tool,
@@ -636,7 +725,7 @@ function jevExtension(pi) {
       const name = String(event?.toolName ?? "");
       if (!/^(bash|write|edit|delete|move|rm|mcp__)/i.test(name))
         return;
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, void 0, redactOn(ENV, "hook"));
       const verdict = await judgeDestructive(cfg, { tool: name, input: event?.input ?? {}, cwd: process.cwd() }, { threshold: GATE_THRESHOLD });
       if (verdict.blocked) {
         return {
@@ -687,7 +776,7 @@ function jevExtension(pi) {
       for (const s of roster) {
         byName.set(s.name, s.description.replace(/\s+/g, " ").slice(0, 180));
       }
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, void 0, redactOn(ENV, "hook"));
       const result = await routeSkill(cfg, text, shortlist.map((name) => ({ name, description: byName.get(name) ?? "" })), { minConfidence: SKILL_MIN_CONFIDENCE, maxCandidates: 12 });
       if (result.skill !== null) {
         return { additionalContext: "[jev] Consider loading skill: " + result.skill };
@@ -714,7 +803,7 @@ function jevExtension(pi) {
         truncateHeadChars: envNum(ENV, "OMP_JEV_TRUNCATE_HEAD", COMPACT_DEFAULTS.truncateHeadChars),
         minReductionRatio: envNum(ENV, "OMP_JEV_MIN_REDUCTION", COMPACT_DEFAULTS.minReductionRatio)
       };
-      const cfg = readConfig(ENV);
+      const cfg = readConfig(ENV, void 0, redactOn(ENV, "hook"));
       const outcome = await planCompaction({
         region: [...prep.messagesToSummarize ?? [], ...prep.turnPrefixMessages ?? []],
         ask: jevAsker(cfg),

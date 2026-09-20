@@ -21,6 +21,7 @@ describe("resolveEnvConfig", () => {
     expect(cfg.baseUrl).toBe("https://api.typesafe.ai");
     expect(cfg.model).toBe("jev-latest");
     expect(cfg.timeoutMs).toBeUndefined();
+    expect(cfg.redact).toBe(true);
   });
 
   it("honours env overrides and strips trailing slashes", () => {
@@ -29,7 +30,9 @@ describe("resolveEnvConfig", () => {
     process.env.TYPESAFE_DEFAULT_MODEL = "jev-1.13.0";
     process.env.JEV_TIMEOUT_MS = "2500";
     const cfg = resolveEnvConfig();
-    expect(cfg).toEqual({ apiKey: "k", baseUrl: "https://example.com", model: "jev-1.13.0", timeoutMs: 2500 });
+    expect(cfg).toEqual({ apiKey: "k", baseUrl: "https://example.com", model: "jev-1.13.0", timeoutMs: 2500, redact: true });
+    process.env.JEV_REDACT = "0";
+    expect(resolveEnvConfig().redact).toBe(false);
   });
 
   it("throws for a missing key when required, not otherwise", () => {
