@@ -1,0 +1,54 @@
+name: "Jev PR Triage"
+description: >-
+  Batched Jev (System One) judgments on a pull request: auth impact, risk
+  score, and review routing — one call, three answers. Fail-open: a missing
+  key or a Jev outage skips triage instead of blocking the PR.
+branding:
+  icon: "shield"
+  color: "green"
+
+inputs:
+  github_token:
+    description: "Token for GitHub API calls (diff, comment, labels)."
+    required: false
+    default: ${{ github.token }}
+  comment:
+    description: "Upsert a single triage comment on the PR (never spams — one comment, updated)."
+    required: false
+    default: "true"
+  labels:
+    description: "Apply jev:security / jev:risk-high / jev:auth labels from the judgment."
+    required: false
+    default: "true"
+  auth_label_threshold:
+    description: "touches_auth probability at or above which the jev:auth label is applied."
+    required: false
+    default: "0.7"
+  risk_label_threshold:
+    description: "Risk score (0-4) at or above which the jev:risk-high label is applied."
+    required: false
+    default: "4"
+  max_diff_chars:
+    description: "Diff characters sent to Jev; Jev is text-only and larger diffs are truncated."
+    required: false
+    default: "60000"
+  strict:
+    description: 'Fail the job instead of skipping when Jev triage cannot run ("true"/"false").'
+    required: false
+    default: "false"
+
+outputs:
+  touches_auth:
+    description: "Probability (0-1) that the change affects authentication or session security."
+  risk:
+    description: "Probability-weighted risk score (0-4)."
+  route:
+    description: "Chosen review route: auto | peer | security."
+  route_confidence:
+    description: "Confidence of the route choice (0-1)."
+  comment_url:
+    description: "URL of the upserted triage comment (when comment is enabled)."
+
+runs:
+  using: "node20"
+  main: "dist/index.js"

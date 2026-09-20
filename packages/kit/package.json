@@ -1,14 +1,11 @@
 {
-  "name": "@jev-harness/mcp",
+  "name": "@jev-harness/kit",
   "version": "0.1.0",
-  "description": "MCP server (stdio) exposing TypeSafe's Jev (System One) decision model as tools.",
+  "description": "Shared foundation for Jev (System One) harness adapters: env config, result envelope, core-pattern plumbing.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=20"
-  },
-  "bin": {
-    "jev-harness-mcp": "./dist/index.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -27,21 +24,22 @@
     "build": "tsc -p tsconfig.json",
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@jev-harness/core": "*",
-    "@modelcontextprotocol/sdk": "^1.30.0"
+    "@jev-harness/core": "*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^5.0.1"
   },
   "keywords": [
     "jev",
     "typesafe",
-    "mcp",
-    "model-context-protocol",
-    "system-one"
+    "system-one",
+    "adapter",
+    "toolkit",
+    "extension"
   ]
 }
