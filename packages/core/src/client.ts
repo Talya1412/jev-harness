@@ -79,6 +79,11 @@ export async function askJev(
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    if (signal?.aborted) {
+      const abortErr = new Error("Jev call aborted");
+      abortErr.name = "AbortError";
+      throw abortErr;
+    }
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     signal?.addEventListener("abort", onAbort, { once: true });

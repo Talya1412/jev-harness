@@ -86,6 +86,29 @@ describe("askJev", () => {
       .rejects.toThrow();
     expect(n).toBe(2);
   });
+
+  it("does not fire a live request when the signal is already aborted", async () => {
+    let n = 0;
+    const impl = (async () => { n++; return new Response(JSON.stringify(ok), { status: 200 }); }) as unknown as typeof fetch;
+    const controller = new AbortController();
+    controller.abort();
+    await expect(askJev({ apiKey: "k", fetchImpl: impl }, { x: 1 }, { q: { type: "noul", instructions: "?" } }, controller.signal))
+      .rejects.toThrow(/aborted/);
+    expect(n).toBe(0);
+  });
+
+  it("stops retrying when the signal aborts during backoff", async () => {
+    let n = 0;
+    const impl = (async () => { n++; return new Response("boom", { status: 500 }); }) as unknown as typeof fetch;
+    const controller = new AbortController();
+    await expect(askJev(
+      { apiKey: "k", fetchImpl: impl, maxAttempts: 3, onRetry: () => controller.abort() },
+      { x: 1 },
+      { q: { type: "noul", instructions: "?" } },
+      controller.signal,
+    )).rejects.toThrow(/aborted/);
+    expect(n).toBe(1);
+  });
 });
 
 describe("typed accessors", () => {
