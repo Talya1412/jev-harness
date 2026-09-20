@@ -16,23 +16,23 @@
     }
   },
   "files": [
+    "bundle",
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/bundle.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
-  },
-  "dependencies": {
-    "@jev-harness/core": "^0.1.0"
+    "test": "vitest run --passWithNoTests",
+    "bundle": "node scripts/bundle.mjs"
   },
   "peerDependencies": {
     "@oh-my-pi/pi-coding-agent": "*"
   },
   "omp": {
     "extensions": [
-      "./dist/extension.js"
+      "./bundle/extension.js"
     ],
     "envDocs": {
       "TYPESAFE_API_KEY": "Required. System One API key. Never hardcoded, never logged.",
@@ -57,5 +57,8 @@
     "oh-my-pi",
     "omp",
     "extension"
-  ]
+  ],
+  "devDependencies": {
+    "esbuild": "^0.21.5"
+  }
 }
