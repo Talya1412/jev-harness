@@ -60,4 +60,4 @@ jobs:
       # @jev-harness/core dist exists before the adapters bundle it.
       - run: npm run build
       - name: Fail on stale committed bundles
-        run: git diff --exit-code -- packages/omp/bundle packages/claude-code/dist packages/github/dist
+        run: git diff --exit-code -- packages/omp/bundle packages/claude-code/dist packages/github/dist packages/claude-code/.claude-plugin
