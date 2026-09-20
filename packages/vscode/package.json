@@ -3,6 +3,7 @@
   "displayName": "jev-harness",
   "description": "TypeSafe Jev (System One) decisions inline in VS Code — destructive-change gate and RAG verification gate, fail-open by design.",
   "version": "0.1.0",
+  "private": true,
   "publisher": "jev-harness",
   "license": "Apache-2.0",
   "engines": { "vscode": "^1.80.0" },

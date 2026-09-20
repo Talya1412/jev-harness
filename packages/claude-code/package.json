@@ -4,6 +4,11 @@
   "description": "Claude Code plugin: TypeSafe Jev (System One) destructive-tool gating and skill routing.",
   "type": "module",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Talya1412/jev-harness.git",
+    "directory": "packages/claude-code"
+  },
   "engines": {
     "node": ">=20"
   },
