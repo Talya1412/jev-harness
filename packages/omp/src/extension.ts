@@ -20,14 +20,20 @@
  * Auth: TYPESAFE_API_KEY from the environment (never hardcoded, never logged).
  * Optional overrides: TYPESAFE_BASE_URL, TYPESAFE_DEFAULT_MODEL, JEV_TIMEOUT_MS.
  */
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
   askJev,
   chooseBrowserAction,
+  createBudgetGuard,
+  createPersistentCache,
   judgeDestructive,
   listJevModels,
   pickTool,
   routeSkill,
+  withPersistentCache,
+  type JevConfig,
   type Questions,
 } from "@jev-harness/core";
 import { GATE_THRESHOLD, SKILL_MIN_CONFIDENCE, autoOn, envNum, readConfig, redactOn } from "./config.js";
@@ -36,6 +42,27 @@ import { MIN_PROMPT_CHARS, candidatePayload, shortlistSkills, type SkillCandidat
 
 /** `process.env` bound once, so the pure helpers stay testable. */
 const ENV = process.env;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Process-wide resilience layer shared by every tool and hook:
+ * - budget guard caps runaway loops (default 120 requests/min, OMP_JEV_MAX_CALLS_PER_MIN to tune, 0 = off)
+ * - persistent cache turns repeat judgments into free hits across sessions
+ */
+const maxPerMin = envNum(ENV, "OMP_JEV_MAX_CALLS_PER_MIN", 120);
+const guard = maxPerMin > 0 ? createBudgetGuard({ maxPerWindow: maxPerMin, windowMs: 60_000 }) : null;
+const persistentCache = createPersistentCache({
+  dir: (ENV.OMP_JEV_CACHE_DIR ?? "").trim() || join(homedir(), ".omp", "cache", "jev-harness"),
+  ttlMs: envNum(ENV, "OMP_JEV_CACHE_TTL_MS", DAY_MS),
+});
+
+/** readConfig + resilience wrapping. Unifies every askJev call site. */
+function jevConfig(modelOverride?: string, redact?: boolean): JevConfig {
+  let cfg = readConfig(ENV, modelOverride, redact);
+  if (guard) cfg = guard.wrap(cfg);
+  return withPersistentCache(cfg, persistentCache);
+}
 
 export default function jevExtension(pi: ExtensionAPI): void {
   const z = pi.zod;
@@ -70,7 +97,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     loadMode: "essential",
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig(ENV, params.model, redactOn(ENV, "tool"));
+      const cfg = jevConfig(params.model, redactOn(ENV, "tool"));
       const result = await askJev(cfg, params.state, params.questions as unknown as Questions, signal ?? undefined);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -87,7 +114,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     loadMode: "essential",
     approval: "read",
     async execute(_id: string, _params: any, _signal?: AbortSignal) {
-      const cfg = readConfig(ENV);
+      const cfg = jevConfig();
       const models = await listJevModels(cfg);
       const text = JSON.stringify(models, null, 2);
       return { content: [{ type: "text", text }], details: { models } };
@@ -108,7 +135,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     }),
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig(ENV, undefined, redactOn(ENV, "tool"));
+      const cfg = jevConfig(undefined, redactOn(ENV, "tool"));
       const result = await routeSkill(
         cfg,
         params.task,
@@ -148,7 +175,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig(ENV, undefined, redactOn(ENV, "tool"));
+      const cfg = jevConfig(undefined, redactOn(ENV, "tool"));
       const result = await chooseBrowserAction(
         cfg,
         {
@@ -188,7 +215,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig(ENV, undefined, redactOn(ENV, "tool"));
+      const cfg = jevConfig(undefined, redactOn(ENV, "tool"));
       const result = await pickTool(
         cfg,
         { task: params.task, tools: params.tools, context: params.context },
@@ -221,7 +248,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
       const name = String(event?.toolName ?? "");
       // Only adjudicate tools that can mutate the world; cheap reads skip the call.
       if (!/^(bash|write|edit|delete|move|rm|mcp__)/i.test(name)) return;
-      const cfg = readConfig(ENV, undefined, redactOn(ENV, "hook"));
+      const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
       const verdict = await judgeDestructive(
         cfg,
         { tool: name, input: event?.input ?? {}, cwd: process.cwd() },
@@ -288,7 +315,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
       for (const s of roster) {
         byName.set(s.name, s.description.replace(/\s+/g, " ").slice(0, 180));
       }
-      const cfg = readConfig(ENV, undefined, redactOn(ENV, "hook"));
+      const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
       const result = await routeSkill(
         cfg,
         text,
@@ -333,7 +360,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
         minReductionRatio: envNum(ENV, "OMP_JEV_MIN_REDUCTION", COMPACT_DEFAULTS.minReductionRatio),
       };
 
-      const cfg = readConfig(ENV, undefined, redactOn(ENV, "hook"));
+      const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
       const outcome = await planCompaction({
         region: [...(prep.messagesToSummarize ?? []), ...(prep.turnPrefixMessages ?? [])],
         ask: jevAsker(cfg),
