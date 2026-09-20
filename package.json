@@ -15,7 +15,7 @@
     "playground": "npm run start --workspace=@jev-harness/playground",
     "changeset": "changeset",
     "changeset:version": "changeset version && npm install --package-lock-only",
-    "release": "npm run build && npm publish --workspaces --access public --provenance"
+    "release": "npm run build && changeset publish"
   },
   "engines": {
     "node": ">=20"
