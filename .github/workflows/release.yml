@@ -31,6 +31,10 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
       - run: npm ci --include=dev
+      # Commit Version Packages as the repo owner, not github-actions[bot].
+      - run: |-
+          git config user.name "Talya1412"
+          git config user.email "99625225+Talya1412@users.noreply.github.com"
       - uses: changesets/action@v1
         with:
           version: npm run changeset:version
