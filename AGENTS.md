@@ -29,6 +29,19 @@ it never emits prose. See @README.md for primitives and patterns.
   + `triageUrgency` + `routeSkill` into an advisory PR comment. Posts via `gh`;
   fail-open (missing key or outage never fails the run). Ships `action.yml` +
   @packages/github/dist/action.js.
+- @packages/jev-py — zero-dependency Python port of core (async client over
+  `urllib`+`asyncio`, 3 primitives, all 12 patterns, transport infra) and
+  `eval` (metrics + `tune`). `jev-tune` console script. Pure-stdlib: no
+  runtime deps; `pytest` is a dev extra. NOT an npm workspace (no
+  package.json) — run tests with `python -m pytest` from the package dir.
+- @packages/playground — dependency-free static web UI (HTML/CSS/JS, no
+  build). Composes state+questions, calls Jev or runs a deterministic mock
+  when no key, and visualizes probabilities with a live threshold slider.
+  Serve with `python -m http.server`. NOT an npm workspace.
+- @packages/vscode — VS Code extension (CommonJS). Two fail-open commands:
+  destructive-change gate + RAG verification gate. Decision logic in
+  @packages/vscode/jev.js (minimal CJS port of core, injectable transport).
+  Tests via `node --test` (no VS Code runtime needed).
 
 ## Code Style Guidelines
 

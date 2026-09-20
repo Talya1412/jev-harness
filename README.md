@@ -16,6 +16,9 @@ Jev is not a chat model. You send it a `state` plus typed `questions` and it ret
 | [`@jev-harness/cli`](packages/cli) | CI / subagent workflows | CLI | `jev-gate` semantic acceptance gate |
 | [`@jev-harness/eval`](packages/eval) | Evaluation | CLI | `jev-tune` threshold sweep + Brier/ECE/ROC-AUC/PR-AUC metrics |
 | [`@jev-harness/github`](packages/github) | GitHub Actions | Node action | Jev-driven PR review: routes reviewer, flags destructive |
+| [`jev-harness` (Python)](packages/jev-py) | Python | async / `urllib` | Zero-dep port of core: client, 12 patterns, transport infra, `eval` + `jev-tune` CLI |
+| [`jev playground`](packages/playground) | Browser | static HTML/JS | Compose decisions + visualize probabilities; live threshold slider |
+| [`@jev-harness/vscode`](packages/vscode) | VS Code | Extension | Inline destructive-change gate + RAG verification gate, fail-open |
 
 ## Why Jev
 

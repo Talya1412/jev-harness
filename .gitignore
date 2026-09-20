@@ -13,6 +13,15 @@ packages/pi/dist/
 packages/cli/dist/
 packages/eval/dist/
 
+# Python (jev-py): bytecode, editable-install metadata, test cache.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+packages/jev-py/build/
+packages/jev-py/dist/
+.pytest_cache/
+
 # Command Code session data
 .commandcode/
 

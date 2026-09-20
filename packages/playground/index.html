@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>jev playground</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+  <h1>jev playground</h1>
+  <p class="tag">Compose a <code>state</code> + typed <code>questions</code>, run System&nbsp;One, and inspect the calibrated probabilities. Drag the threshold to see a gate flip in real time.</p>
+</header>
+
+<main>
+  <section class="col config">
+    <h2>config</h2>
+    <label>base URL
+      <input id="baseUrl" value="https://api.typesafe.ai" />
+    </label>
+    <label>API key
+      <input id="apiKey" type="password" placeholder="ts_…  (leave empty to use mock)" />
+    </label>
+    <label>model
+      <input id="model" value="jev-latest" />
+    </label>
+    <div class="row">
+      <button id="run">run jev</button>
+      <label class="check"><input id="mock" type="checkbox" checked /> mock when no key</label>
+    </div>
+    <p id="status" class="status">idle</p>
+  </section>
+
+  <section class="col state">
+    <h2>state <span class="muted">(arbitrary JSON)</span></h2>
+    <textarea id="state" spellcheck="false">{
+  "task": "delete the production database",
+  "tool": "bash",
+  "input": { "cmd": "dropdb --force prod" }
+}</textarea>
+
+    <h2>questions <span class="muted">(batched into one call)</span></h2>
+    <div id="questions"></div>
+    <button id="addQ" class="ghost">+ add question</button>
+  </section>
+
+  <section class="col results">
+    <h2>answers</h2>
+    <div id="answers"><p class="muted">run jev to see calibrated probabilities.</p></div>
+    <div id="raw" class="raw"></div>
+  </section>
+</main>
+
+<footer><a href="https://github.com/Talya1412/jev-harness" target="_blank" rel="noopener">jev-harness</a> · playground · zero dependencies</footer>
+<script src="app.js"></script>
+</body>
+</html>
