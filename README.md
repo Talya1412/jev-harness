@@ -8,16 +8,20 @@ Jev is not a chat model. You send it a `state` plus typed `questions` and it ret
 
 | Package | Harness | Transport | Capabilities |
 |---|---|---|---|
-| [`@jev-harness/core`](packages/core) | — | — | Client, primitives, reusable patterns (no framework imports) |
+| [`@jev-harness/core`](packages/core) | — | — | Client, primitives, 21 patterns, redaction, budget guard, caches, decision log |
 | [`@jev-harness/omp`](packages/omp) | [Oh My Pi](https://github.com/can1357/oh-my-pi) | Extension | 5 tools + 3 hooks (incl. verbatim compaction) |
 | [`@jev-harness/mcp`](packages/mcp) | Any MCP client | MCP over stdio | 7 tools |
 | [`@jev-harness/claude-code`](packages/claude-code) | Claude Code | Plugin | PreToolUse gate + prompt skill routing |
 | [`@jev-harness/pi`](packages/pi) | Pi | Extension | 5 tools + 2 hooks |
-| [`@jev-harness/eval`](packages/eval) | — | `jev-eval` CLI + library | Labeled-dataset evaluation: accuracy, calibration, threshold sweeps |
+| [`@jev-harness/eval`](packages/eval) | — | `jev-eval` + `jev-tune` CLIs | Labeled-dataset evaluation, calibration, threshold sweeps, golden baselines |
+| [`@jev-harness/github`](packages/github) | GitHub Actions | Action | `jev-review`: advisory PR review comment (fail-open) |
+| [`@jev-harness/jev-gate-action`](packages/jev-gate-action) | GitHub Actions | Action | Semantic acceptance gate: destructive + secret-leak + risk on a PR diff |
 | [`@jev-harness/pr-triage-action`](packages/pr-triage-action) | GitHub Actions | Action | PR triage: auth impact, risk score, review routing |
 | [`@jev-harness/kit`](packages/kit) | — | — | Shared adapter foundation: env config, result envelope, core-pattern plumbing |
 | [`@jev-harness/playground`](packages/playground) | — | `npm run playground` | Local web playground: state + questions → live probabilities |
 | [`@jev-harness/cli`](packages/cli) | CI / subagent workflows | `jev` + `jev-gate` CLIs | `jev ask/models/eval` terminal access + `jev-gate` semantic acceptance gate |
+| [`jev-py`](packages/jev-py) | Python | stdlib-only client | Async client, 12+ patterns, eval + tune (parity-tested against the TS metrics) |
+| [`@jev-harness/vscode`](packages/vscode) | VS Code | Extension | Destructive-change gate + claim verification, fail-open |
 
 ## Why Jev
 
@@ -74,6 +78,18 @@ choice(res, "route").choice; // "security"
 - **`isDuplicate`** — semantic dedup of memory entries and tool results in one batched call.
 - **`routeEffort`** — decide whether a task deserves the expensive model or the cheap fast tier.
 
+Safety and verification patterns (`verifyClaim`, `detectPromptInjection`, `needsMoreContext`, `judgeRegression`, `triageUrgency`, `chooseSubagent`, `debateJudge`) and devops patterns (`commitGate`, `migrationSafety`, `testPrioritizer`, `secretLeak`, `dedupeItems`, `logSeverity`) ship in the same package — every one is a single batched call with overridable thresholds.
+
+## Keeping secrets and money under control
+
+- **Redaction** — `JevConfig.redact: true` scrubs likely secrets and direct identifiers (AWS keys, JWTs, private keys, GitHub/Slack tokens, `sk-` keys, auth headers, env secret assignments, URL credentials, connection strings, emails) from `state` before the request leaves the machine. Fail-open, opt-in at the client level; the OMP and Claude Code hooks enable it by default (`OMP_JEV_REDACT=0` / `JEV_REDACT=0` to disable).
+- **Budget guard** — `createBudgetGuard` caps requests per rolling window and per lifetime, so a runaway hook loop becomes a loud error instead of a bill.
+- **Persistent cache** — `createPersistentCache` + `withPersistentCache` serve exact-repeat judgments from disk across restarts, with hit-rate stats.
+
+## Observability
+
+`createDecisionLog` records one structured row per judgment — kind, model, a stable digest of (kind, state, questions), answers, threshold, action, latency — and `compare()` computes agreement/flip-rate between two logs over matching digests. That is the raw material for threshold and model-version tuning: set `OMP_JEV_DECISION_LOG` to a path and the OMP gate appends every verdict as JSONL.
+
 ## Caching, coalescing, failure policy
 
 Hooks fire per tool call, so core ships the cost controls that keep them cheap:
@@ -114,6 +130,10 @@ Every threshold in this repo is a starting point, not ground truth. [`@jev-harne
 TYPESAFE_API_KEY=... jev eval --dataset cases.jsonl --out report.json
 ```
 
+The repo ships its own **golden baseline** — a live recording of the destructive-gate question over 38 labeled tool calls ([`packages/eval/golden`](packages/eval/golden)): AUC 0.996, Brier 0.051, accuracy 94.7% at the suggested 0.15 threshold, ~$0.0006 per run. A vitest regression gate re-derives those numbers on every CI run, and a manual [`live-eval` workflow](.github/workflows/live-eval.yml) re-runs the dataset against the real API and fails on quality drops. Re-record with `node packages/eval/scripts/record-baseline.mjs`.
+
+Recorded finding worth knowing: `chmod -R 777 /` and fork bombs score LOW against the destructive-gate question, because its wording enumerates data-destruction examples (deletion, force-push, dropped tables) rather than system-abuse ones. Question wording is a design surface — this is what the eval toolkit is for.
+
 ## Configuration
 
 Every adapter resolves credentials the same way:
@@ -124,6 +144,10 @@ Every adapter resolves credentials the same way:
 | `TYPESAFE_BASE_URL` | no | `https://api.typesafe.ai` | Override the API host |
 | `TYPESAFE_DEFAULT_MODEL` | no | `jev-latest` | Pin a model version once thresholds are tuned |
 | `JEV_TIMEOUT_MS` | no | `15000` | Per-request timeout |
+| `JEV_REDACT` / `OMP_JEV_REDACT` | no | on (hooks) | `"0"` disables state redaction |
+| `OMP_JEV_MAX_CALLS_PER_MIN` | no | `120` | Rolling-window budget for the OMP adapter; `0` disables |
+| `OMP_JEV_CACHE_DIR` / `OMP_JEV_CACHE_TTL_MS` | no | `~/.omp/cache/jev-harness`, 24h | Persistent judgment cache |
+| `OMP_JEV_DECISION_LOG` | no | — | Path to a JSONL file for gate decision records |
 
 Credentials are read from the environment and never logged.
 
@@ -131,6 +155,8 @@ Credentials are read from the environment and never logged.
 
 - **Fail open by default.** A Jev outage must never block your agent. Every hook catches its own errors and resolves to "allow".
 - **Advisory, not authoritative.** Tools report a decision; code executes it. The one exception is the destructive gate, which is explicitly a veto.
+- **State redaction before transport.** Tool input, diffs, and history routinely embed secrets; they are scrubbed before any request leaves the machine.
+- **Budget-capped hooks.** A runaway loop hits the budget guard and fails open loudly instead of quietly spending.
 - **No mid-conversation model switching.** Measured: switching models mid-stream invalidates the provider prompt cache and cost one deployment `$19.53` across 309 requests.
 - **Append-only context injection.** Skill hints are appended to the user turn, never used to rewrite the system prefix.
 
