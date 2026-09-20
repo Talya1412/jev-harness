@@ -1,13 +1,13 @@
 # Dependencies
 node_modules/
 
-# Build output is ignored by default, except the two artifacts that MUST ship:
-#   - the Claude Code plugin's compiled hook (Claude Code executes a .js file)
-#   - the OMP package's self-contained bundle (OMP cannot resolve bare imports)
-dist/
-bundle/
-!packages/claude-code/dist/
-!packages/omp/bundle/
+# Build output. The Claude Code plugin ships its compiled hook (Claude Code
+# executes a .js file) and the OMP package ships a self-contained bundle
+# (OMP's loader cannot resolve bare imports), so neither dist/ is ignored.
+packages/core/dist/
+packages/mcp/dist/
+packages/omp/dist/
+packages/pi/dist/
 
 *.tsbuildinfo
 coverage/
