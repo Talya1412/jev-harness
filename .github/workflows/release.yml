@@ -2,8 +2,13 @@ name: release
 
 # Version + publish via changesets. A "Version Packages" PR opens whenever
 # *.changeset/ files land on master; merging it publishes the changed
-# packages to npm with provenance. Requires the NPM_TOKEN secret and an
-# @jev-harness scope on npmjs.com.
+# packages to npm with provenance.
+#
+# Owner setup required before this workflow can succeed:
+#  1. NPM_TOKEN repository secret (npm token with publish rights to
+#     @jev-harness).
+#  2. Repo Settings → Actions → General → "Allow GitHub Actions to create
+#     and approve pull requests" must be ON, or use a PAT for GITHUB_TOKEN.
 on:
   push:
     branches: [master]
