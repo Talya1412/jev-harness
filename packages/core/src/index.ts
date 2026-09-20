@@ -5,6 +5,7 @@ export * from "./patterns-ops.js";
 export * from "./infra.js";
 export * from "./redact.js";
 export * from "./budget.js";
+export * from "./decision-log.js";
 export * from "./types.js";
 export * from "./cache.js";
 export * from "./persist-cache.js";
