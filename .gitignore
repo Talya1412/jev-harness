@@ -16,6 +16,8 @@ packages/kit/dist/
 # dist/index.js directly); the tsc intermediates are local build noise.
 packages/pr-triage-action/dist/*
 !packages/pr-triage-action/dist/index.js
+packages/jev-gate-action/dist/*
+!packages/jev-gate-action/dist/index.js
 
 # Command Code session data
 .commandcode/
