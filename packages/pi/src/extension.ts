@@ -27,101 +27,29 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-/** Shared with the OMP adapter: pairs below this keep-score are stale. */
-const DEFAULT_KEEP_THRESHOLD = 0.2;
-/** Upper bound on pairs judged in one compaction pass. */
-const MAX_COMPACTION_PAIRS = 40;
+import {
+  blockText,
+  collectToolPairs,
+  keepThreshold,
+  resolveJevConfig,
+  truncate,
+  DEFAULT_KEEP_THRESHOLD,
+  MAX_COMPACTION_PAIRS,
+  type ToolPair,
+} from "./compact.js";
 
-function resolveJevConfig(): JevConfig {
-  const timeoutRaw = Number(process.env.JEV_TIMEOUT_MS ?? "");
-  const config: JevConfig = {
-    apiKey: process.env.TYPESAFE_API_KEY ?? "",
-  };
-  const baseUrl = (process.env.TYPESAFE_BASE_URL ?? "").trim();
-  if (baseUrl) config.baseUrl = baseUrl;
-  const model = (process.env.TYPESAFE_DEFAULT_MODEL ?? "").trim();
-  if (model) config.model = model;
-  if (Number.isFinite(timeoutRaw) && timeoutRaw > 0) config.timeoutMs = timeoutRaw;
-  return config;
-}
+/** Bound once; the pure helpers take it as a parameter so tests need no globals. */
+const ENV = process.env;
 
-function keepThreshold(): number {
-  const raw = Number(process.env.OMP_JEV_KEEP_THRESHOLD ?? "");
-  if (Number.isFinite(raw) && raw >= 0 && raw <= 1) return raw;
-  return DEFAULT_KEEP_THRESHOLD;
-}
-
-function truncate(text: string, max: number): string {
-  return text.length > max ? text.slice(0, max) + " [truncated]" : text;
-}
-
-function errorText(tool: string, err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
-  return tool + " failed (fail-open, host unaffected): " + msg.slice(0, 500);
-}
-
+/** Tool-result envelope. Presentation only — not worth extracting. */
 function ok(text: string, details?: unknown) {
   return { content: [{ type: "text" as const, text }], details };
 }
 
-/** Plain-text head of a tool-result content payload. */
-function blockText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  const parts: string[] = [];
-  for (const block of content) {
-    if (
-      typeof block === "object" &&
-      block !== null &&
-      (block as { type?: unknown }).type === "text" &&
-      typeof (block as { text?: unknown }).text === "string"
-    ) {
-      parts.push((block as { text: string }).text);
-    }
-  }
-  return parts.join("\n");
-}
-
-interface ToolPair {
-  key: string;
-  tool: string;
-  argsText: string;
-  resultText: string;
-}
-
-/**
- * Pair assistant tool calls with their results by toolCallId.
- * Only complete pairs are eligible for keep/drop judgments.
- */
-function collectToolPairs(
-  entries: SessionBeforeCompactEvent["branchEntries"],
-): ToolPair[] {
-  const calls = new Map<string, { tool: string; argsText: string }>();
-  const results = new Map<string, string>();
-  for (const entry of entries) {
-    if (entry.type !== "message") continue;
-    const message = entry.message;
-    if (message.role === "assistant") {
-      for (const block of message.content) {
-        if (block.type === "toolCall") {
-          calls.set(block.id, {
-            tool: block.name,
-            argsText: truncate(JSON.stringify(block.arguments ?? {}), 500),
-          });
-        }
-      }
-    } else if (message.role === "toolResult") {
-      results.set(message.toolCallId, truncate(blockText(message.content), 500));
-    }
-  }
-  const pairs: ToolPair[] = [];
-  for (const [id, call] of calls) {
-    const resultText = results.get(id);
-    if (resultText === undefined) continue;
-    pairs.push({ key: id, tool: call.tool, argsText: call.argsText, resultText });
-    if (pairs.length >= MAX_COMPACTION_PAIRS) break;
-  }
-  return pairs;
+/** Fail-open error surface: the host agent must never stall on a Jev outage. */
+function errorText(tool: string, err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return tool + " failed (fail-open, host unaffected): " + msg.slice(0, 500);
 }
 
 export default function jevPi(pi: ExtensionAPI): void {
@@ -146,7 +74,7 @@ export default function jevPi(pi: ExtensionAPI): void {
     execute: async (_id, params, signal) => {
       try {
         const response = await askJev(
-          resolveJevConfig(),
+          resolveJevConfig(ENV),
           params.state,
           params.questions as Questions,
           signal ?? undefined,
@@ -170,7 +98,7 @@ export default function jevPi(pi: ExtensionAPI): void {
     parameters: Type.Object({}),
     execute: async () => {
       try {
-        const models = await listJevModels(resolveJevConfig());
+        const models = await listJevModels(resolveJevConfig(ENV));
         const lines = models.map((m) =>
           m.description ? m.name + " - " + m.description : m.name,
         );
@@ -212,7 +140,7 @@ export default function jevPi(pi: ExtensionAPI): void {
     execute: async (_id, params, signal) => {
       try {
         const result = await routeSkill(
-          resolveJevConfig(),
+          resolveJevConfig(ENV),
           params.message,
           params.skills.map((s) => ({
             name: s.name,
@@ -248,7 +176,7 @@ export default function jevPi(pi: ExtensionAPI): void {
     execute: async (_id, params, signal) => {
       try {
         const result = await pickTool(
-          resolveJevConfig(),
+          resolveJevConfig(ENV),
           {
             task: params.task,
             tools: params.tools.map((t) => ({
@@ -302,7 +230,7 @@ export default function jevPi(pi: ExtensionAPI): void {
     execute: async (_id, params, signal) => {
       try {
         const result = await chooseBrowserAction(
-          resolveJevConfig(),
+          resolveJevConfig(ENV),
           {
             goal: params.goal,
             page: {
@@ -337,7 +265,7 @@ export default function jevPi(pi: ExtensionAPI): void {
       if (!(process.env.TYPESAFE_API_KEY ?? "").trim()) return undefined;
       const pairs = collectToolPairs(event.branchEntries);
       if (pairs.length === 0) return undefined;
-      const threshold = keepThreshold();
+      const threshold = keepThreshold(ENV.OMP_JEV_KEEP_THRESHOLD);
       const questions: Questions = {};
       for (const p of pairs) {
         questions["keep_call_" + p.key] = {
@@ -356,7 +284,7 @@ export default function jevPi(pi: ExtensionAPI): void {
         };
       }
       const response = await askJev(
-        resolveJevConfig(),
+        resolveJevConfig(ENV),
         {
           pairs: pairs.map((p) => ({
             tool: p.tool,
@@ -427,7 +355,7 @@ export default function jevPi(pi: ExtensionAPI): void {
       const tools = pi.getAllTools();
       if (tools.length === 0) return undefined;
       void routeSkill(
-        resolveJevConfig(),
+        resolveJevConfig(ENV),
         text.slice(0, 2000),
         tools.map((t) => ({ name: t.name, description: t.description ?? "" })),
         { minConfidence: 0.5 },
