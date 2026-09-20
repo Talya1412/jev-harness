@@ -10,7 +10,7 @@
  * Both are process-local, advisory, and purely an optimization: clearing them
  * at any time never changes correctness, only cost and latency.
  */
-import { askJev, type JevConfig, type JevResponse, type Questions } from "./client.js";
+import { askJev, validateQuestions, type JevConfig, type JevResponse, type Questions } from "./client.js";
 
 /** Deterministic JSON stringify (object keys sorted) so equal states hash equal. */
 export function stableStringify(value: unknown): string {
@@ -146,49 +146,70 @@ export function createCoalescer(config: JevConfig, opts: { windowMs?: number } =
     timer = null;
     const batch = queue;
     queue = [];
-    const groups = new Map<string, Item[]>();
-    for (const item of batch) {
-      const group = groups.get(item.stateKey);
-      if (group) group.push(item);
-      else groups.set(item.stateKey, [item]);
-    }
-    for (const group of groups.values()) {
-      if (group.length === 1) {
-        const only = group[0]!;
+    try {
+      const groups = new Map<string, Item[]>();
+      for (const item of batch) {
+        const group = groups.get(item.stateKey);
+        if (group) group.push(item);
+        else groups.set(item.stateKey, [item]);
+      }
+      for (const group of groups.values()) {
+        if (group.length === 1) {
+          const only = group[0]!;
+          requests++;
+          try {
+            only.resolve(await askJev(config, only.state, only.questions));
+          } catch (err) {
+            only.reject(err);
+          }
+          continue;
+        }
         requests++;
         try {
-          only.resolve(await askJev(config, only.state, only.questions));
-        } catch (err) {
-          only.reject(err);
-        }
-        continue;
-      }
-      const merged: Questions = {};
-      for (let i = 0; i < group.length; i++) {
-        for (const [id, q] of Object.entries(group[i]!.questions)) merged[`${i}:${id}`] = q;
-      }
-      requests++;
-      try {
-        const full = await askJev(config, group[0]!.state, merged);
-        for (let i = 0; i < group.length; i++) {
-          const prefix = `${i}:`;
-          const answers: JevResponse["answers"] = {};
-          for (const [id, answer] of Object.entries(full.answers)) {
-            if (id.startsWith(prefix)) answers[id.slice(prefix.length)] = answer;
+          const merged: Questions = {};
+          for (let i = 0; i < group.length; i++) {
+            for (const [id, q] of Object.entries(group[i]!.questions)) merged[`${i}:${id}`] = q;
           }
-          group[i]!.resolve({ model: full.model, answers, usage: full.usage });
+          const full = await askJev(config, group[0]!.state, merged);
+          for (let i = 0; i < group.length; i++) {
+            const prefix = `${i}:`;
+            const answers: JevResponse["answers"] = {};
+            for (const [id, answer] of Object.entries(full.answers)) {
+              if (id.startsWith(prefix)) answers[id.slice(prefix.length)] = answer;
+            }
+            group[i]!.resolve({ model: full.model, answers, usage: full.usage });
+          }
+        } catch (err) {
+          for (const item of group) item.reject(err);
         }
-      } catch (err) {
-        for (const item of group) item.reject(err);
       }
+    } catch (err) {
+      // Catch-all: no queued caller may ever be left unsettled. Double
+      // rejects/resolves on already-settled items are harmless no-ops.
+      for (const item of batch) item.reject(err);
     }
   }
 
   return {
     ask(state, questions) {
       return new Promise<JevResponse>((resolve, reject) => {
-        queue.push({ stateKey: stableStringify(state), state, questions, resolve, reject });
-        if (timer === null) timer = setTimeout(() => void flush(), windowMs);
+        // Validate up front so misuse rejects this caller with a typed usage
+        // error instead of blowing up async flush for the whole batch.
+        try {
+          validateQuestions(questions);
+        } catch (err) {
+          reject(err);
+          return;
+        }
+        let stateKey: string;
+        try {
+          stateKey = stableStringify(state);
+        } catch (err) {
+          reject(err);
+          return;
+        }
+        queue.push({ stateKey, state, questions, resolve, reject });
+        if (timer === null) timer = setTimeout(() => void flush().catch(() => {}), windowMs);
       });
     },
     requestCount() {

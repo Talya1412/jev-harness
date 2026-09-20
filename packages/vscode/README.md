@@ -25,10 +25,10 @@ Open `packages/vscode` in VS Code and press `F5` (an Extension Development Host 
 ## Test the core (no VS Code needed)
 
 ```bash
-cd packages/vscode && node --test        # uses node:test + a fake transport
+cd packages/vscode && npm test               # uses node:test + a fake transport
 ```
 
-`jev.js` is a minimal CJS port of `@jev-harness/core` (`askJev` + `noul`/`choice`/`score` + the three patterns the commands use), with an injectable transport so it is unit-tested without VS Code.
+`jev.js` is a minimal CJS port of `@jev-harness/core` (`askJev` + `noul`/`choice`/`score` + the three patterns the commands use), with an injectable transport so it is unit-tested without VS Code. It mirrors 3 core patterns (`judgeDestructive`, `verifyClaim`, `triageUrgency`) and must be hand-synced when their wording changes — there is no build step linking them.
 
 ## License
 

@@ -12,7 +12,8 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -40,12 +41,10 @@
     "routing",
     "classification"
   ],
-  "dependencies": {
-    "esbuild": "0.28.2"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Talya1412/jev-harness.git",
     "directory": "packages/core"
-  }
+  },
+  "sideEffects": false
 }

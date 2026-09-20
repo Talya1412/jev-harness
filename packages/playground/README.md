@@ -16,6 +16,10 @@ npm run playground
 Requires `TYPESAFE_API_KEY` in the server environment (`TYPESAFE_BASE_URL`,
 `TYPESAFE_DEFAULT_MODEL`, and `JEV_TIMEOUT_MS` are honored too).
 
+> **Do not expose this server.** It binds `0.0.0.0` with `TYPESAFE_API_KEY`
+> in its environment and proxies arbitrary Jev calls — run it on localhost
+> only, never on a public interface.
+
 ## What it does
 
 - **Four presets** — destructive gate, PR triage, injection gate, skill

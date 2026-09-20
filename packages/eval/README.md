@@ -100,10 +100,13 @@ console.log(formatReport(report));
 | `--timeout-ms <n>` | `15000` | Per-request timeout |
 | `--concurrency <n>` | `4` | Cases in flight |
 | `--no-sweep` | off | Skip the noul threshold sweep |
+| `--no-fail` | off | Exit 0 even when cases failed (exploratory runs) |
 | `--sweep-steps <n>` | `20` | Sweep resolution |
 
 Failing cases never abort the run: they are listed in the report. The CLI
-exits 0 with the report; a missing key or unreadable dataset exits non-zero.
+exits 0 when every case passed, 1 when cases failed (`--no-fail` opts out
+for exploratory runs), and 2 on usage errors such as a missing key or an
+unreadable dataset.
 
 ## CI usage
 

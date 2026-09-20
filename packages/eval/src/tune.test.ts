@@ -49,6 +49,46 @@ describe("tune", () => {
     expect(s.prAuc).toBeCloseTo(1, 6);
   });
 
+  it("matches a brute-force binaryMetrics sweep at every candidate", async () => {
+    const { binaryMetrics } = await import("../src/metrics.js");
+    const data = pairs(
+      [0.05, false],
+      [0.1, false],
+      [0.1, true],
+      [0.35, true],
+      [0.5, false],
+      [0.5, true],
+      [0.8, true],
+      [0.95, true],
+    );
+    for (const objective of ["f1", "youden"] as const) {
+      const s = tune(data, objective);
+      expect(s.sweep).toHaveLength(new Set([...data.map(({ p }) => p), 0.5]).size);
+      for (const row of s.sweep) {
+        const m = binaryMetrics(data, row.threshold);
+        expect(row.precision).toBe(m.precision);
+        expect(row.recall).toBe(m.recall);
+        expect(row.f1).toBe(m.f1);
+      }
+    }
+  });
+
+  it("handles a 10k-pair tune quickly (no per-candidate full sort)", () => {
+    let seed = 42;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 0xffffffff;
+    };
+    const data: BinaryPair[] = Array.from({ length: 10_000 }, () => ({
+      p: Math.round(rand() * 100) / 100,
+      y: rand() > 0.5 ? (1 as const) : (0 as const),
+    }));
+    const started = Date.now();
+    const s = tune(data);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(s.n).toBe(10_000);
+  });
+
   it("handles an empty dataset without throwing", () => {
     const s = tune([]);
     expect(s.n).toBe(0);

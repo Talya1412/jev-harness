@@ -1,4 +1,5 @@
 /**
+ * Mirrors 3 core patterns (judgeDestructive, verifyClaim, triageUrgency) — hand-synced, keep wording identical to packages/core.
  * Minimal CJS port of @jev-harness/core for the VS Code extension. Same
  * question instructions as packages/core, so the extension's decisions are
  * behaviorally identical to the TS/Python adapters. Dependency-free: uses

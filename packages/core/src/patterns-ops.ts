@@ -96,7 +96,10 @@ export async function migrationSafety(
 ): Promise<MigrationSafetyResult> {
   const response = await askJev(
     config,
-    { migration, dialect: migration.dialect ?? "sql" },
+    {
+      migration: { ...migration, sql: migration.sql?.slice(0, MAX_DIFF_CHARS) },
+      dialect: migration.dialect ?? "sql",
+    },
     {
       data_loss: {
         type: "noul",
@@ -145,6 +148,8 @@ export interface TestPrioritizerResult {
   ranked: Array<{ name: string; relevance: number }>;
   /** Indexes into the ORIGINAL input array, ranked the same way. */
   rankedIndexes: number[];
+  /** True when the input exceeded MAX_ITEMS and only the first 30 were analyzed. */
+  truncated: boolean;
 }
 
 /**
@@ -159,7 +164,8 @@ export async function testPrioritizer(
   opts: { signal?: AbortSignal } = {},
 ): Promise<TestPrioritizerResult> {
   const selected = tests.slice(0, MAX_ITEMS);
-  if (selected.length === 0) return { ranked: [], rankedIndexes: [] };
+  const truncated = tests.length > selected.length;
+  if (selected.length === 0) return { ranked: [], rankedIndexes: [], truncated };
   const questions: Record<string, { type: "noul"; instructions: string }> = {};
   for (let i = 0; i < selected.length; i++) {
     questions[`t${i}`] = {
@@ -182,16 +188,19 @@ export async function testPrioritizer(
   return {
     ranked: scored.map(({ name, relevance }) => ({ name, relevance })),
     rankedIndexes: scored.map(({ index }) => index),
+    truncated,
   };
 }
 
 // ----------------------------- secretLeak -----------------------------
 
 export interface SecretLeakResult {
-  /** P(each input text contains a real credential or secret), by input index. */
+  /** P(each ANALYZED text contains a real credential or secret), by analyzed index. */
   probabilities: number[];
-  /** Input indexes scoring at or above the threshold (default 0.6). */
+  /** Analyzed indexes scoring at or above the threshold (default 0.6). */
   flagged: number[];
+  /** True when the input exceeded MAX_ITEMS and only the first 30 were analyzed. */
+  truncated: boolean;
 }
 
 /**
@@ -205,7 +214,8 @@ export async function secretLeak(
   opts: { threshold?: number; signal?: AbortSignal } = {},
 ): Promise<SecretLeakResult> {
   const selected = texts.slice(0, MAX_ITEMS);
-  if (selected.length === 0) return { probabilities: [], flagged: [] };
+  const truncated = texts.length > selected.length;
+  if (selected.length === 0) return { probabilities: [], flagged: [], truncated };
   const questions: Record<string, { type: "noul"; instructions: string }> = {};
   for (let i = 0; i < selected.length; i++) {
     questions[`s${i}`] = {
@@ -223,7 +233,7 @@ export async function secretLeak(
   );
   const probabilities = selected.map((_, i) => noul(response, `s${i}`));
   const threshold = opts.threshold ?? 0.6;
-  return { probabilities, flagged: probabilities.map((p, i) => (p >= threshold ? i : -1)).filter((i) => i >= 0) };
+  return { probabilities, flagged: probabilities.map((p, i) => (p >= threshold ? i : -1)).filter((i) => i >= 0), truncated };
 }
 
 // ----------------------------- dedupeItems -----------------------------
@@ -233,6 +243,8 @@ export interface DedupeResult {
   unique: Array<{ index: number; item: string }>;
   /** Original indexes judged to duplicate an EARLIER item. */
   duplicateIndexes: number[];
+  /** True when the input exceeded MAX_ITEMS and only the first 30 were analyzed. */
+  truncated: boolean;
 }
 
 /**
@@ -246,7 +258,8 @@ export async function dedupeItems(
   opts: { signal?: AbortSignal } = {},
 ): Promise<DedupeResult> {
   const selected = items.slice(0, MAX_ITEMS);
-  if (selected.length === 0) return { unique: [], duplicateIndexes: [] };
+  const truncated = items.length > selected.length;
+  if (selected.length === 0) return { unique: [], duplicateIndexes: [], truncated };
   const questions: Record<string, { type: "noul"; instructions: string }> = {};
   for (let i = 1; i < selected.length; i++) {
     questions[`d${i}`] = {
@@ -257,7 +270,7 @@ export async function dedupeItems(
     };
   }
   // A single item can never be a duplicate of an earlier one; skip the call.
-  if (selected.length === 1) return { unique: [{ index: 0, item: selected[0]! }], duplicateIndexes: [] };
+  if (selected.length === 1) return { unique: [{ index: 0, item: selected[0]! }], duplicateIndexes: [], truncated };
   const response = await askJev(
     config,
     { items: selected.map((t, i) => ({ id: `d${i}`, text: t.slice(0, MAX_ITEM_CHARS) })) },
@@ -272,6 +285,7 @@ export async function dedupeItems(
   return {
     unique: selected.map((item, index) => ({ index, item })).filter(({ index }) => !dupSet.has(index)),
     duplicateIndexes,
+    truncated,
   };
 }
 
@@ -280,9 +294,11 @@ export async function dedupeItems(
 export type LogLevel = "debug" | "info" | "warn" | "error" | "critical";
 
 export interface LogSeverityResult {
-  /** Severity per input line, by input index. */
+  /** Severity per ANALYZED line, by analyzed index. */
   levels: LogLevel[];
   confidence: Array<Record<string, number>>;
+  /** True when the input exceeded MAX_ITEMS and only the first 30 were analyzed. */
+  truncated: boolean;
 }
 
 /**
@@ -295,7 +311,8 @@ export async function logSeverity(
   opts: { signal?: AbortSignal } = {},
 ): Promise<LogSeverityResult> {
   const selected = lines.slice(0, MAX_ITEMS);
-  if (selected.length === 0) return { levels: [], confidence: [] };
+  const truncated = lines.length > selected.length;
+  if (selected.length === 0) return { levels: [], confidence: [], truncated };
   const criteria: Record<LogLevel, string> = {
     debug: "Development detail; safe to ignore in production",
     info: "Normal operational event; no action needed",
@@ -324,5 +341,5 @@ export async function logSeverity(
     levels.push(c.choice as LogLevel);
     confidence.push(c.probabilities);
   }
-  return { levels, confidence };
+  return { levels, confidence, truncated };
 }

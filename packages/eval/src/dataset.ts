@@ -56,10 +56,17 @@ export function parseDatasetJson(text: string): EvalDataset {
 export function parseDatasetJsonl(text: string): EvalDataset {
   const questions: Questions = {};
   const cases: EvalCase[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i]!.trim();
     if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("//")) continue;
-    const obj = JSON.parse(trimmed) as { questions?: Questions } & Record<string, unknown>;
+    let obj: { questions?: Questions } & Record<string, unknown>;
+    try {
+      obj = JSON.parse(trimmed) as { questions?: Questions } & Record<string, unknown>;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`invalid JSONL on line ${i + 1}: ${msg}`);
+    }
     if (obj.questions) Object.assign(questions, obj.questions);
     cases.push(toCase(obj, cases.length));
   }
@@ -97,10 +104,12 @@ export function labelToScoreIndex(value: unknown, criteria: string[]): number | 
     return i >= 0 && i < criteria.length ? i : null;
   }
   if (typeof value === "string") {
+    // Number("") is 0, so an empty/blank label must not coerce to level 0.
+    if (value.trim() === "") return null;
     const byName = criteria.findIndex((c) => c.toLowerCase() === value.trim().toLowerCase());
     if (byName >= 0) return byName;
     const n = Number(value);
-    if (Number.isFinite(n)) {
+    if (value.trim() !== "" && Number.isFinite(n)) {
       const i = Math.round(n);
       return i >= 0 && i < criteria.length ? i : null;
     }

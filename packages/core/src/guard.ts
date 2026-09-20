@@ -34,7 +34,11 @@ export async function withFailMode<T>(mode: FailMode, fn: () => Promise<T>, outc
   try {
     return await fn();
   } catch (err) {
-    outcomes.onError?.(err);
+    try {
+      outcomes.onError?.(err);
+    } catch {
+      // A throwing observer must never break the fail-open/closed contract.
+    }
     if (mode === "throw") throw err;
     return mode === "open" ? outcomes.open : outcomes.closed;
   }

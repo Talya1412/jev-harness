@@ -12,11 +12,16 @@ permissions:
   issues: write
   pull-requests: write
 
+# A newer push on the same PR supersedes earlier triage runs.
+concurrency:
+  group: pr-triage-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   triage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./packages/pr-triage-action
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

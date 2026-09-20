@@ -68,7 +68,26 @@ export function createJevToolkit(
       return askJev(config(call?.model), state, questions, call?.signal);
     },
     models(signal) {
-      return listJevModels(config());
+      // Contract: listJevModels(config, signal?). The core signal param lands
+      // in parallel; forward it and fall back when the installed core still
+      // takes a single argument (extra args are ignored at runtime anyway).
+      const list = listJevModels as (cfg: JevConfig, ...rest: unknown[]) => ReturnType<typeof listJevModels>;
+      if (signal?.aborted) return Promise.reject(new Error("Jev models call aborted"));
+      if (!signal) return listJevModels(config());
+      return new Promise((resolve, reject) => {
+        const onAbort = () => reject(new Error("Jev models call aborted"));
+        signal.addEventListener("abort", onAbort, { once: true });
+        list(config(), signal).then(
+          (v) => {
+            signal.removeEventListener("abort", onAbort);
+            resolve(v);
+          },
+          (e) => {
+            signal.removeEventListener("abort", onAbort);
+            reject(e);
+          },
+        );
+      });
     },
     routeSkills(message, skills, call) {
       return routeSkill(config(), message, skills, call);

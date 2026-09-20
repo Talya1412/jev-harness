@@ -26,6 +26,14 @@ describe("decisionDigest", () => {
     expect(a).toBe(b);
   });
 
+  it("digests circular state with a marker instead of throwing", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const digest = decisionDigest("k", circular, ["q"]);
+    expect(typeof digest).toBe("string");
+    expect(digest).toBe(decisionDigest("k", circular, ["q"]));
+  });
+
   it("changes when kind, state, or questions change", () => {
     const base = decisionDigest("k", { a: 1 }, ["q"]);
     expect(decisionDigest("other", { a: 1 }, ["q"])).not.toBe(base);

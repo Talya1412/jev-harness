@@ -11,7 +11,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { askJev, listJevModels, type JevConfig, type Questions } from "@jev-harness/core";
-import { resolveEnvConfig } from "@jev-harness/kit";
+import { parseTimeoutMs, resolveEnvConfig } from "@jev-harness/kit";
 import { runEvalCli } from "@jev-harness/eval/cli";
 
 /** A usage error: bad flags or arguments. Exits 2, not 1. */
@@ -91,9 +91,10 @@ function parseCommonFlags(argv: string[]): { args: SimpleArgs; rest: Array<[stri
       case "--model": args.model = next(); break;
       case "--base-url": args.baseUrl = next(); break;
       case "--timeout-ms": {
-        const n = Number(next());
-        if (!Number.isFinite(n) || n <= 0) throw new UsageError("--timeout-ms must be a positive number");
-        args.timeoutMs = Math.floor(n);
+        // Shared capped parser: huge values cannot overflow setTimeout into ~1ms.
+        const n = parseTimeoutMs(next());
+        if (n === undefined) throw new UsageError("--timeout-ms must be a positive number");
+        args.timeoutMs = n;
         break;
       }
       case "-h": case "--help": args.help = true; break;
@@ -212,11 +213,9 @@ async function modelsCommand(argv: string[], io: CliIo): Promise<number> {
 async function evalCommand(argv: string[], io: CliIo): Promise<number> {
   if (argv.includes("-h") || argv.includes("--help")) {
     io.out("jev eval — evaluate Jev questions against a labeled dataset\n\nDelegates to jev-eval.\n\n");
-    await runEvalCli(["--help"]);
-    return 0;
+    return runEvalCli(["--help"], { out: io.out, err: io.err });
   }
-  await runEvalCli(argv);
-  return 0;
+  return runEvalCli(argv, { out: io.out, err: io.err });
 }
 
 /** Run one jev invocation. Returns the process exit code (0/1/2). */

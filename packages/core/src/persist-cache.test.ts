@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPersistentCache } from "./persist-cache.js";
+import { createPersistentCache, withPersistentCache } from "./persist-cache.js";
 import { createCachedClient } from "./cache.js";
 import type { JevResponse } from "./types.js";
 
@@ -78,6 +78,20 @@ describe("createPersistentCache", () => {
     expect(first.size).toBe(0);
     const second = createPersistentCache({ dir });
     expect(second.size).toBe(0);
+  });
+
+  it("passes non-string bodies straight through without caching", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return new Response(JSON.stringify(resp(0.5)), { status: 200 });
+    }) as unknown as typeof fetch;
+    const cfg = withPersistentCache({ apiKey: "k", fetchImpl }, createPersistentCache({ dir }));
+    const stream = () => new ReadableStream({ start: (c) => { c.enqueue(new TextEncoder().encode("{}")); c.close(); } });
+    await cfg.fetchImpl!("https://api.typesafe.ai/v1/systemone", { method: "POST", body: stream() as unknown as BodyInit });
+    await cfg.fetchImpl!("https://api.typesafe.ai/v1/systemone", { method: "POST", body: stream() as unknown as BodyInit });
+    // Both went to transport (no collapsed "[object ReadableStream]" cache hit).
+    expect(calls).toBe(2);
   });
 
   it("wires into createCachedClient for cross-restart hits", async () => {

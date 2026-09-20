@@ -5,6 +5,15 @@ on:
     branches: [master, main]
   pull_request:
 
+# Least privilege: this workflow only reads the repo and runs tests.
+permissions:
+  contents: read
+
+# A newer push on the same ref supersedes earlier runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -34,3 +43,21 @@ jobs:
       - run: python -m pip install pytest
       - name: jev-py test suite (includes TS parity fixtures)
         run: python -m pytest packages/jev-py/tests -q
+
+  bundle-drift:
+    # The committed bundles below are consumed directly (OMP loads
+    # packages/omp/bundle; the Claude Code marketplace and the GitHub
+    # Action consume their dist/ dirs), so a stale bundle must fail CI.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace=@jev-harness/omp
+      - run: npm run build --workspace=@jev-harness/claude-code
+      - run: npm run build --workspace=@jev-harness/github
+      - name: Fail on stale committed bundles
+        run: git diff --exit-code -- packages/omp/bundle packages/claude-code/dist packages/github/dist

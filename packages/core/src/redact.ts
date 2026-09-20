@@ -46,6 +46,7 @@ export const BUILTIN_REDACT_PATTERNS: RedactPattern[] = [
   },
   { label: "slack-token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g },
   { label: "api-key", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
+  { label: "google-api-key", pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g },
   {
     label: "auth-header",
     pattern: /\b(Bearer|Basic)\s+[A-Za-z0-9\-._~+/]{16,}={0,2}/gi,
@@ -95,11 +96,38 @@ export function redactState(state: unknown, opts: RedactOptions = {}): unknown {
   return walk(state, 0, opts);
 }
 
+function isPlainObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 function walk(value: unknown, depth: number, opts: RedactOptions): unknown {
   if (typeof value === "string") return redactText(value, opts);
   if (value === null || typeof value !== "object") return value;
   if (depth >= (opts.maxDepth ?? 12)) return value;
   if (Array.isArray(value)) return value.map((v) => walk(v, depth + 1, opts));
+  // Date/Map/Set/class instances have no own enumerable string-keyed state
+  // (Object.entries(new Date()) is {}), so walking them as plain objects
+  // would silently corrupt the state. Preserve their content instead — the
+  // redacted structure then carries the same information JSON.stringify of
+  // the original state would, minus any secrets.
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return redactText(value.toISOString(), opts);
+  }
+  if (value instanceof Map) {
+    return Array.from(value.entries(), ([k, v]) => [walk(k, depth + 1, opts), walk(v, depth + 1, opts)]);
+  }
+  if (value instanceof Set) {
+    return Array.from(value, (v) => walk(v, depth + 1, opts));
+  }
+  if (!isPlainObject(value)) {
+    try {
+      return redactText(String(value), opts);
+    } catch {
+      return PLACEHOLDER + ":opaque]";
+    }
+  }
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
     out[k] = walk(v, depth + 1, opts);

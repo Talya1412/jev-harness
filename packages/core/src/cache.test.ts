@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { stableStringify, fnv1a, createJevCache, createCachedClient, createCoalescer } from "../src/cache.js";
+import { JevError } from "../src/types.js";
 import type { JevResponse } from "../src/types.js";
 
 /** Echoes one noul answer per requested question id, recording request bodies. */
@@ -122,6 +123,28 @@ describe("createCoalescer", () => {
     ]);
     expect(bodies).toHaveLength(2);
     expect(client.requestCount()).toBe(2);
+  });
+
+  it("rejects non-object questions at ask() time with a usage error", async () => {
+    const { impl, bodies } = echoFetch();
+    const client = createCoalescer({ apiKey: "k", fetchImpl: impl }, { windowMs: 5 });
+    await expect(client.ask({ s: 1 }, null as unknown as Parameters<typeof client.ask>[1])).rejects.toThrow(JevError);
+    await expect(client.ask({ s: 1 }, {} as Parameters<typeof client.ask>[1])).rejects.toThrow(/non-empty/);
+    // No request was ever issued for the invalid calls.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(bodies).toHaveLength(0);
+    expect(client.requestCount()).toBe(0);
+  });
+
+  it("rejects an unserializable state at ask() time and still serves the good caller", async () => {
+    const { impl, bodies } = echoFetch();
+    const client = createCoalescer({ apiKey: "k", fetchImpl: impl }, { windowMs: 5 });
+    const good = client.ask({ s: 1 }, { a: noulQ });
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    await expect(client.ask(circular, { b: noulQ })).rejects.toThrow();
+    await expect(good).resolves.toBeDefined();
+    expect(bodies).toHaveLength(1);
   });
 
   it("propagates Jev failures to every caller in the group", async () => {

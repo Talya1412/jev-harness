@@ -37,6 +37,7 @@ var BUILTIN_REDACT_PATTERNS = [
   },
   { label: "slack-token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g },
   { label: "api-key", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
+  { label: "google-api-key", pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g },
   {
     label: "auth-header",
     pattern: /\b(Bearer|Basic)\s+[A-Za-z0-9\-._~+/]{16,}={0,2}/gi,
@@ -73,6 +74,10 @@ function redactText(text, opts = {}) {
 function redactState(state, opts = {}) {
   return walk(state, 0, opts);
 }
+function isPlainObject(value) {
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
 function walk(value, depth, opts) {
   if (typeof value === "string")
     return redactText(value, opts);
@@ -82,6 +87,24 @@ function walk(value, depth, opts) {
     return value;
   if (Array.isArray(value))
     return value.map((v) => walk(v, depth + 1, opts));
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime()))
+      return null;
+    return redactText(value.toISOString(), opts);
+  }
+  if (value instanceof Map) {
+    return Array.from(value.entries(), ([k, v]) => [walk(k, depth + 1, opts), walk(v, depth + 1, opts)]);
+  }
+  if (value instanceof Set) {
+    return Array.from(value, (v) => walk(v, depth + 1, opts));
+  }
+  if (!isPlainObject(value)) {
+    try {
+      return redactText(String(value), opts);
+    } catch {
+      return PLACEHOLDER + ":opaque]";
+    }
+  }
   const out = {};
   for (const [k, v] of Object.entries(value)) {
     out[k] = walk(v, depth + 1, opts);
@@ -259,7 +282,7 @@ function appendSummary(text) {
 async function githubFetch(path, init = {}, accept) {
   const base = env("GITHUB_API_URL") || "https://api.github.com";
   const headers = {
-    Authorization: `Bearer ${env("GITHUB_TOKEN")}`,
+    Authorization: `Bearer ${env("INPUT_GITHUB_TOKEN") || env("GITHUB_TOKEN")}`,
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "jev-harness-gate",
     "Content-Type": "application/json"
@@ -347,11 +370,16 @@ async function run() {
     warning(`Jev gate verdict: block (destructive=${destructive.toFixed(2)}, secret_leak=${secretLeakP.toFixed(2)}) \u2014 advisory only.`);
   }
 }
-run().catch((err) => {
-  const message = err instanceof Error ? err.message : String(err);
-  if (boolInput("strict", false)) {
-    console.log(`::error::Jev gate failed: ${message}`);
-    process.exit(1);
-  }
-  warning(`Jev gate failed (fail-open): ${message}`);
-});
+if (process.env.VITEST_WORKER_ID === void 0) {
+  run().catch((err) => {
+    const message = err instanceof Error ? err.message : String(err);
+    if (boolInput("strict", false)) {
+      console.log(`::error::Jev gate failed: ${message}`);
+      process.exit(1);
+    }
+    warning(`Jev gate failed (fail-open): ${message}`);
+  });
+}
+export {
+  githubFetch
+};

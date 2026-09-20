@@ -16,13 +16,15 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "files": [
     "dist",
     "src",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "pi": {
     "extensions": [
@@ -35,8 +37,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@jev-harness/core": "*",
-    "@jev-harness/kit": "*"
+    "@jev-harness/core": "^0.2.0",
+    "@jev-harness/kit": "^0.2.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.85.1",

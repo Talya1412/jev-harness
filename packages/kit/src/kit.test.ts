@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
-import { resolveEnvConfig } from "./config.js";
+import { MAX_TIMEOUT_MS, parseTimeoutMs, resolveEnvConfig } from "./config.js";
 import { okResult, errorResult, errorText } from "./results.js";
 import { createJevToolkit } from "./toolkit.js";
 import { lexicalShortlist } from "./router.js";
@@ -50,6 +50,14 @@ describe("resolveEnvConfig", () => {
     process.env.JEV_TIMEOUT_MS = "0";
     expect(resolveEnvConfig().timeoutMs).toBeUndefined();
   });
+
+  it("caps a huge timeout at MAX_TIMEOUT_MS", () => {
+    process.env.JEV_TIMEOUT_MS = "99999999999";
+    expect(resolveEnvConfig().timeoutMs).toBe(MAX_TIMEOUT_MS);
+    expect(parseTimeoutMs("99999999999")).toBe(MAX_TIMEOUT_MS);
+    expect(parseTimeoutMs("2500")).toBe(2500);
+    expect(parseTimeoutMs("")).toBeUndefined();
+  });
 });
 
 describe("results", () => {
@@ -84,6 +92,17 @@ describe("createJevToolkit", () => {
     process.env.TYPESAFE_DEFAULT_MODEL = "pinned";
     await kit.ask({ s: 1 }, { q: { type: "noul", instructions: "?" } });
     expect(bodies[1].model).toBe("pinned");
+  });
+
+  it("honours an aborted signal on models()", async () => {
+    process.env.TYPESAFE_API_KEY = "k";
+    const fetchImpl = (async () => {
+      throw new Error("must not fetch when already aborted");
+    }) as unknown as typeof fetch;
+    const kit = createJevToolkit({ requireKey: true, fetchImpl });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(kit.models(controller.signal)).rejects.toThrow(/abort/i);
   });
 
   it("throws on a missing key only when requireKey is set", async () => {

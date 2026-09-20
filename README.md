@@ -1,6 +1,6 @@
 # jev-harness
 
-Integrations for **[TypeSafe Jev](https://typesafe.ai)** — the System One decision model — across four agent harnesses.
+Integrations for **[TypeSafe Jev](https://typesafe.ai)** — the System One decision model — across fourteen packages spanning agent harnesses, CI actions, CLIs, and editor extensions.
 
 Jev is not a chat model. You send it a `state` plus typed `questions` and it returns **calibrated probabilities** your code acts on directly. That makes it the right tool for routing, ranking, gating, and verification — anywhere you currently pay a chat model to emit JSON you immediately parse.
 
@@ -8,7 +8,7 @@ Jev is not a chat model. You send it a `state` plus typed `questions` and it ret
 
 | Package | Harness | Transport | Capabilities |
 |---|---|---|---|
-| [`@jev-harness/core`](packages/core) | — | — | Client, primitives, 21 patterns, redaction, budget guard, caches, decision log |
+| [`@jev-harness/core`](packages/core) | — | — | Client, primitives, 23 patterns, redaction, budget guard, caches, decision log |
 | [`@jev-harness/omp`](packages/omp) | [Oh My Pi](https://github.com/can1357/oh-my-pi) | Extension | 5 tools + 3 hooks (incl. verbatim compaction) |
 | [`@jev-harness/mcp`](packages/mcp) | Any MCP client | MCP over stdio | 7 tools |
 | [`@jev-harness/claude-code`](packages/claude-code) | Claude Code | Plugin | PreToolUse gate + prompt skill routing |

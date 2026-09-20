@@ -82,4 +82,14 @@ describe("label coercion", () => {
     expect(labelToScoreIndex(9, criteria)).toBeNull();
     expect(labelToScoreIndex("bogus", criteria)).toBeNull();
   });
+
+  it("treats empty-string score labels as missing, not level 0", () => {
+    const criteria = ["None", "Low"];
+    expect(labelToScoreIndex("", criteria)).toBeNull();
+    expect(labelToScoreIndex("   ", criteria)).toBeNull();
+  });
+
+  it("wraps JSONL parse errors with the line number", () => {
+    expect(() => parseDatasetJsonl(`{"state": {}, "label": {}}\n{broken`)).toThrow(/line 2/);
+  });
 });

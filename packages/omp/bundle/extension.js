@@ -38,6 +38,7 @@ var BUILTIN_REDACT_PATTERNS = [
   },
   { label: "slack-token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g },
   { label: "api-key", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
+  { label: "google-api-key", pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g },
   {
     label: "auth-header",
     pattern: /\b(Bearer|Basic)\s+[A-Za-z0-9\-._~+/]{16,}={0,2}/gi,
@@ -74,6 +75,10 @@ function redactText(text, opts = {}) {
 function redactState(state, opts = {}) {
   return walk(state, 0, opts);
 }
+function isPlainObject(value) {
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
 function walk(value, depth, opts) {
   if (typeof value === "string")
     return redactText(value, opts);
@@ -83,6 +88,24 @@ function walk(value, depth, opts) {
     return value;
   if (Array.isArray(value))
     return value.map((v) => walk(v, depth + 1, opts));
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime()))
+      return null;
+    return redactText(value.toISOString(), opts);
+  }
+  if (value instanceof Map) {
+    return Array.from(value.entries(), ([k, v]) => [walk(k, depth + 1, opts), walk(v, depth + 1, opts)]);
+  }
+  if (value instanceof Set) {
+    return Array.from(value, (v) => walk(v, depth + 1, opts));
+  }
+  if (!isPlainObject(value)) {
+    try {
+      return redactText(String(value), opts);
+    } catch {
+      return PLACEHOLDER + ":opaque]";
+    }
+  }
   const out = {};
   for (const [k, v] of Object.entries(value)) {
     out[k] = walk(v, depth + 1, opts);
@@ -211,15 +234,70 @@ async function askJev(config, state, questions, signal) {
   }
   throw lastError ?? new JevError("Jev call failed", { retryable: false });
 }
-async function listJevModels(config) {
+async function listJevModels(config, signal) {
   const cfg = resolveConfig(config);
-  const res = await cfg.fetchImpl(cfg.baseUrl + "/v1/models", {
-    headers: { Authorization: "Bearer " + cfg.apiKey }
-  });
-  if (!res.ok)
-    throw new JevError(`Jev models HTTP ${res.status}`, { status: res.status });
-  const body = await res.json();
-  return body.models ?? [];
+  let lastError = null;
+  for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    if (signal?.aborted) {
+      const abortErr = new Error("Jev models call aborted");
+      abortErr.name = "AbortError";
+      throw abortErr;
+    }
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
+    try {
+      const res = await cfg.fetchImpl(cfg.baseUrl + "/v1/models", {
+        headers: { Authorization: "Bearer " + cfg.apiKey },
+        signal: controller.signal
+      });
+      if (res.status === 429 || res.status >= 500) {
+        const text = await res.text().catch(() => "");
+        lastError = new JevError(`Jev models HTTP ${res.status}: ${text.slice(0, 300)}`, {
+          status: res.status,
+          retryable: true
+        });
+        if (attempt < cfg.maxAttempts) {
+          cfg.onRetry?.(attempt, lastError);
+          await sleep(250 * attempt * attempt);
+          continue;
+        }
+        throw lastError;
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new JevError(`Jev models HTTP ${res.status}: ${text.slice(0, 500)}`, {
+          status: res.status,
+          retryable: false
+        });
+      }
+      let body;
+      try {
+        body = await res.json();
+      } catch {
+        throw new JevError("Jev models returned malformed JSON", { retryable: false });
+      }
+      const models = body?.models;
+      if (!Array.isArray(models))
+        throw new JevError("Jev models response is missing `models`", { retryable: false });
+      return models;
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      if (e instanceof JevError && !e.retryable)
+        throw e;
+      lastError = e;
+      const transient = e.name === "AbortError" || /fetch failed|ECONN|network|timeout|aborted/i.test(e.message);
+      if (!transient || attempt === cfg.maxAttempts)
+        throw e;
+      cfg.onRetry?.(attempt, e);
+      await sleep(250 * attempt * attempt);
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
+  }
+  throw lastError ?? new JevError("Jev models call failed", { retryable: false });
 }
 function noul(response, id) {
   const a = response.answers[id];
@@ -237,11 +315,17 @@ function choice(response, id) {
 }
 
 // ../core/dist/patterns.js
+var MAX_BROWSER_ELEMENTS = 30;
+var MAX_ELEMENT_CHARS = 500;
+var MAX_PAGE_TEXT_CHARS = 8e3;
 async function routeSkill(config, message, skills, options = {}) {
   const minConfidence = options.minConfidence ?? 0.5;
   const shortlist = skills.slice(0, options.maxCandidates ?? 12);
   if (shortlist.length === 0)
     return { skill: null, confidence: 0, probabilities: {} };
+  if (shortlist.some((s) => s.name === "none")) {
+    throw new JevError('routeSkill: "none" is reserved for the abstain option; rename the skill candidate', { retryable: false });
+  }
   const criteria = { none: "No listed skill is relevant to this request" };
   const state = {};
   for (const s of shortlist) {
@@ -277,8 +361,27 @@ async function judgeDestructive(config, call, options = {}) {
 }
 async function chooseBrowserAction(config, input, options = {}) {
   const minConfidence = options.minConfidence ?? 0.4;
+  const selected = input.elements.slice(0, MAX_BROWSER_ELEMENTS);
+  let truncated = input.elements.length > selected.length;
+  const capField = (s) => {
+    if (s === void 0)
+      return void 0;
+    if (s.length > MAX_ELEMENT_CHARS)
+      truncated = true;
+    return s.slice(0, MAX_ELEMENT_CHARS);
+  };
+  const cappedElements = selected.map((e) => ({
+    ...e,
+    label: capField(e.label) ?? "",
+    role: capField(e.role),
+    value: capField(e.value)
+  }));
+  const pageText = input.page.text ?? "";
+  if (pageText.length > MAX_PAGE_TEXT_CHARS)
+    truncated = true;
+  const cappedPage = { ...input.page, text: pageText.slice(0, MAX_PAGE_TEXT_CHARS) };
   const operations = /* @__PURE__ */ new Set();
-  for (const el of input.elements)
+  for (const el of cappedElements)
     for (const op2 of el.operations)
       operations.add(String(op2).toUpperCase());
   const criteria = {
@@ -303,9 +406,12 @@ GOAL: ${input.goal.slice(0, 1e3)}`,
   for (const op2 of operations) {
     if (!["CLICK", "TYPE_TEXT", "SELECT"].includes(op2))
       continue;
-    const eligible = input.elements.filter((e) => e.operations.map((o) => String(o).toUpperCase()).includes(op2));
+    const eligible = cappedElements.filter((e) => e.operations.map((o) => String(o).toUpperCase()).includes(op2));
     if (eligible.length === 0)
       continue;
+    if (eligible.some((e) => e.index === "none")) {
+      throw new JevError('chooseBrowserAction: "none" is reserved for the no-target escape; rename the element index', { retryable: false });
+    }
     const targetCriteria = { none: "Do not target any element for this operation." };
     for (const e of eligible)
       targetCriteria[e.index] = [e.label, e.role, e.value].filter(Boolean).join(" | ");
@@ -317,8 +423,8 @@ GOAL: ${input.goal.slice(0, 1e3)}`,
   }
   const response = await askJev(config, {
     goal: input.goal,
-    page: input.page,
-    elements: input.elements,
+    page: cappedPage,
+    elements: cappedElements,
     recent_actions: input.recentActions ?? []
   }, questions, options.signal);
   const op = choice(response, "operation");
@@ -333,13 +439,16 @@ GOAL: ${input.goal.slice(0, 1e3)}`,
     }
   }
   const act = !!op.choice && op.choice !== "BLOCKED" && op.confidence >= minConfidence;
-  return { operation: op.choice ?? null, target, confidence: op.confidence, act };
+  return { operation: op.choice ?? null, target, confidence: op.confidence, act, truncated };
 }
 async function pickTool(config, input, options = {}) {
   const minConfidence = options.minConfidence ?? 0.4;
   const riskThreshold = options.riskThreshold ?? 0.5;
   if (input.tools.length === 0)
     return { tool: null, confidence: 0, risky: 0, confirmRequired: false, act: false };
+  if (input.tools.some((t) => t.name === "none")) {
+    throw new JevError('pickTool: "none" is reserved for the abstain option; rename the tool', { retryable: false });
+  }
   const criteria = { none: "No listed tool is appropriate; answer or ask the user instead." };
   for (const t of input.tools)
     criteria[t.name] = t.description;
@@ -486,7 +595,13 @@ function createDecisionLog(opts = {}) {
   };
 }
 function decisionDigest(kind, state, questionIds) {
-  return fnv1a(kind + "\n" + stableStringify(state) + "\n" + [...questionIds].sort().join(","));
+  let canon;
+  try {
+    canon = stableStringify(state);
+  } catch {
+    canon = '{"circular":true}';
+  }
+  return fnv1a(kind + "\n" + canon + "\n" + [...questionIds].sort().join(","));
 }
 function jsonlSink(path) {
   return (record) => {
@@ -603,6 +718,9 @@ function withPersistentCache(config, cache) {
   const wrapped = async (url, init) => {
     const target = String(url);
     if (!target.endsWith("/v1/systemone") || init?.method?.toUpperCase() !== "POST") {
+      return parent(url, init);
+    }
+    if (init?.body !== void 0 && typeof init.body !== "string") {
       return parent(url, init);
     }
     const key = target + "\n" + String(init.body ?? "");
@@ -1061,14 +1179,14 @@ function jevExtension(pi) {
       const lower = text.toLowerCase();
       const scored = roster.map((s) => {
         const parts = s.name.toLowerCase().split(/[-_]/);
-        let score2 = 0;
+        let score = 0;
         for (const part of parts) {
           if (part.length > 3 && lower.includes(part))
-            score2 += 2;
+            score += 2;
           if (part.length <= 4 && lower.includes(part))
-            score2 += 1;
+            score += 1;
         }
-        return { name: s.name, score: score2 };
+        return { name: s.name, score };
       });
       const lexical = scored.filter((x) => x.score > 0).map((x) => x.name);
       const shortlist = (lexical.length > 0 ? lexical : roster.map((s) => s.name)).slice(0, 12);

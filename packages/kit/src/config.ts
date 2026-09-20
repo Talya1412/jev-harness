@@ -17,11 +17,19 @@ export interface ResolveEnvConfigOptions {
   requireKey?: boolean;
 }
 
-function parseTimeoutMs(raw: string | undefined): number | undefined {
+/** Largest timeout Node's setTimeout honours; larger values overflow to ~1ms. */
+export const MAX_TIMEOUT_MS = 2147483647;
+
+/**
+ * Parse a timeout-ms value, capping at MAX_TIMEOUT_MS so a huge value
+ * cannot overflow Node's setTimeout into a ~1ms timeout. Shared by the kit
+ * (JEV_TIMEOUT_MS) and the CLIs (--timeout-ms, jev-gate).
+ */
+export function parseTimeoutMs(raw: string | undefined): number | undefined {
   if (raw === undefined || raw.trim() === "") return undefined;
   const n = Number(raw.trim());
   if (!Number.isFinite(n) || n <= 0) return undefined;
-  return Math.floor(n);
+  return Math.min(Math.floor(n), MAX_TIMEOUT_MS);
 }
 
 export function resolveEnvConfig(opts: ResolveEnvConfigOptions = {}): JevConfig {

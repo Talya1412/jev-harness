@@ -41,3 +41,9 @@ __pycache__/
 
 # Internal publishing notes stay untracked.
 PUBLISHING.md
+
+# Committed build artifacts (intentionally NOT ignored — do not add them above):
+# - packages/omp/bundle (extension.js; OMP loads it directly)
+# - packages/claude-code/dist (hooks/jev-hook.js; the marketplace plugin executes it)
+# - packages/github/dist (action.js; the runner executes it via actions/uses:)
+# CI's bundle-drift job rebuilds these and fails on drift (git diff --exit-code).

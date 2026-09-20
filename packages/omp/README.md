@@ -14,10 +14,10 @@ omp plugin install ./packages/omp
 Or copy the built entry into your agent dir so OMP loads it as an extension:
 
 ```sh
-cp packages/omp/dist/extension.js ~/.omp/agent/extensions/jev-tools.js
+cp packages/omp/bundle/extension.js ~/.omp/agent/extensions/jev-tools.js
 ```
 
-The `package.json` `omp.extensions` field points at `./dist/extension.js`.
+The `package.json` `omp.extensions` field points at `./bundle/extension.js`.
 
 ## Tools (always registered)
 

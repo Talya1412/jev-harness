@@ -60,6 +60,20 @@ describe("migrationSafety", () => {
     expect(seen[0].state.dialect).toBe("postgres");
   });
 
+  it("slices an oversized sql payload before sending", async () => {
+    const { fetchImpl, seen } = jevStub({
+      data_loss: n(0.1),
+      irreversible: n(0.1),
+      risk: s(1),
+      verdict: c("apply"),
+    });
+    await migrationSafety(
+      { apiKey: "k", fetchImpl },
+      { sql: "x".repeat(12000), summary: "add column", dialect: "postgres" },
+    );
+    expect(String(seen[0].state.migration.sql)).toHaveLength(8000);
+  });
+
   it("defaults the dialect label", async () => {
     const { fetchImpl, seen } = jevStub({
       data_loss: n(0.1),
@@ -96,8 +110,15 @@ describe("testPrioritizer", () => {
     const answers: JevResponse["answers"] = {};
     for (let i = 0; i < 40; i++) answers[`t${i}`] = n(0.5);
     const { fetchImpl, seen } = jevStub(answers);
-    await testPrioritizer({ apiKey: "k", fetchImpl }, "diff", Array.from({ length: 40 }, (_, i) => `test${i}`));
+    const r = await testPrioritizer({ apiKey: "k", fetchImpl }, "diff", Array.from({ length: 40 }, (_, i) => `test${i}`));
     expect(Object.keys(seen[0].questions)).toHaveLength(30);
+    expect(r.truncated).toBe(true);
+  });
+
+  it("reports truncated false inside the cap", async () => {
+    const { fetchImpl } = jevStub({ t0: n(0.3), t1: n(0.9) });
+    const r = await testPrioritizer({ apiKey: "k", fetchImpl }, "diff", ["a", "b"]);
+    expect(r.truncated).toBe(false);
   });
 });
 
@@ -113,6 +134,15 @@ describe("secretLeak", () => {
     const { fetchImpl } = jevStub({ s0: n(0.6) });
     const r = await secretLeak({ apiKey: "k", fetchImpl }, ["x"], { threshold: 0.8 });
     expect(r.flagged).toEqual([]);
+  });
+
+  it("flags truncation past the 30-item cap", async () => {
+    const answers: JevResponse["answers"] = {};
+    for (let i = 0; i < 30; i++) answers[`s${i}`] = n(0.1);
+    const { fetchImpl, seen } = jevStub(answers);
+    const r = await secretLeak({ apiKey: "k", fetchImpl }, Array.from({ length: 35 }, (_, i) => `text${i}`));
+    expect(Object.keys(seen[0].questions)).toHaveLength(30);
+    expect(r.truncated).toBe(true);
   });
 });
 
@@ -134,6 +164,15 @@ describe("dedupeItems", () => {
     const r = await dedupeItems({ apiKey: "k", fetchImpl }, ["only"]);
     expect(r.unique).toEqual([{ index: 0, item: "only" }]);
   });
+
+  it("flags truncation past the 30-item cap", async () => {
+    const answers: JevResponse["answers"] = {};
+    for (let i = 1; i < 30; i++) answers[`d${i}`] = n(0.1);
+    const { fetchImpl, seen } = jevStub(answers);
+    const r = await dedupeItems({ apiKey: "k", fetchImpl }, Array.from({ length: 35 }, (_, i) => `item${i}`));
+    expect(Object.keys(seen[0].questions)).toHaveLength(29);
+    expect(r.truncated).toBe(true);
+  });
 });
 
 describe("logSeverity", () => {
@@ -153,5 +192,15 @@ describe("logSeverity", () => {
     const { fetchImpl } = jevStub({});
     const r = await logSeverity({ apiKey: "k", fetchImpl }, []);
     expect(r.levels).toEqual([]);
+  });
+
+  it("flags truncation past the 30-line cap", async () => {
+    const answers: JevResponse["answers"] = {};
+    for (let i = 0; i < 30; i++) answers[`l${i}`] = c("info");
+    const { fetchImpl, seen } = jevStub(answers);
+    const r = await logSeverity({ apiKey: "k", fetchImpl }, Array.from({ length: 35 }, (_, i) => `line${i}`));
+    expect(Object.keys(seen[0].questions)).toHaveLength(30);
+    expect(r.levels).toHaveLength(30);
+    expect(r.truncated).toBe(true);
   });
 });

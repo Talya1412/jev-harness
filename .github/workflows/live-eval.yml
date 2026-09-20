@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Manual runs only; serialize them so two calibrations never race.
+concurrency:
+  group: live-eval
+  cancel-in-progress: false
+
 jobs:
   eval:
     runs-on: ubuntu-latest
@@ -21,6 +26,7 @@ jobs:
       - run: npm ci
       - run: npm run build --workspace=@jev-harness/core --if-present
       - run: npm run build --workspace=@jev-harness/eval --if-present
+      # packages/eval/dist is gitignored: the two build steps above must run first.
       - name: Run golden datasets against the live API
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}

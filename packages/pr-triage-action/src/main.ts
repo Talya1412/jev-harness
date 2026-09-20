@@ -13,6 +13,13 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { askJev, choice, noul, score } from "@jev-harness/core";
 
 const MARKER = "<!-- jev-pr-triage -->";
+const ALLOWED_ROUTES: ReadonlySet<string> = new Set(["auto", "peer", "security"]);
+
+/** Clamp the model's free-text route to the allowlist so unexpected values
+ *  never flow into action outputs or silently change labeling. */
+export function normalizeRoute(route: string): string {
+  return ALLOWED_ROUTES.has(route) ? route : "peer";
+}
 const RISK_LEVELS = ["None", "Low", "Moderate", "High", "Critical"] as const;
 
 interface Judgment {
@@ -23,13 +30,15 @@ interface Judgment {
 }
 
 interface EventPayload {
-  pull_request?: { number: number; labels?: Array<{ name: string }> };
+  pull_request?: { number: number; title?: string; body?: string | null; labels?: Array<{ name: string }> };
 }
 
 interface PullRequest {
   repo: string;
   number: number;
   labels: string[];
+  title: string;
+  body: string;
 }
 
 function env(name: string): string {
@@ -65,10 +74,10 @@ function appendSummary(text: string): void {
   if (file) appendFileSync(file, text + "\n");
 }
 
-async function githubFetch(path: string, init: RequestInit = {}, accept?: string): Promise<Response> {
+export async function githubFetch(path: string, init: RequestInit = {}, accept?: string): Promise<Response> {
   const base = env("GITHUB_API_URL") || "https://api.github.com";
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${env("GITHUB_TOKEN")}`,
+    Authorization: `Bearer ${env("INPUT_GITHUB_TOKEN") || env("GITHUB_TOKEN")}`,
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "jev-harness-pr-triage",
     "Content-Type": "application/json",
@@ -85,7 +94,13 @@ function readPullRequest(): PullRequest | null {
   const payload = JSON.parse(readFileSync(eventPath, "utf8")) as EventPayload;
   const pr = payload.pull_request;
   if (!pr || typeof pr.number !== "number") return null;
-  return { repo, number: pr.number, labels: (pr.labels ?? []).map((l) => l.name) };
+  return {
+    repo,
+    number: pr.number,
+    labels: (pr.labels ?? []).map((l) => l.name),
+    title: pr.title ?? "",
+    body: pr.body ?? "",
+  };
 }
 
 function riskLabel(risk: number): string {
@@ -156,8 +171,8 @@ async function run(): Promise<void> {
       timeoutMs: env("JEV_TIMEOUT_MS") ? Number(env("JEV_TIMEOUT_MS")) : undefined,
     },
     {
-      pr_title: (env("PR_TITLE") || "").slice(0, 500),
-      pr_body: (env("PR_BODY") || "").slice(0, 4000),
+      pr_title: (env("PR_TITLE") || pr.title).slice(0, 500),
+      pr_body: (env("PR_BODY") || pr.body).slice(0, 4000),
       diff,
     },
     {
@@ -182,11 +197,12 @@ async function run(): Promise<void> {
     },
   );
 
+  const routeAnswer = choice(response, "route");
   const judgment: Judgment = {
     touches: noul(response, "touches_auth"),
     risk: score(response, "risk").score,
-    route: choice(response, "route").choice,
-    routeConfidence: choice(response, "route").confidence,
+    route: normalizeRoute(routeAnswer.choice),
+    routeConfidence: routeAnswer.confidence,
   };
 
   setOutput("touches_auth", judgment.touches.toFixed(3));
@@ -211,11 +227,14 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err);
-  if (boolInput("strict", false)) {
-    console.log(`::error::Jev triage failed: ${message}`);
-    process.exit(1);
-  }
-  warning(`Jev triage failed (fail-open): ${message}`);
-});
+// Guarded so unit tests can import helpers without firing the action.
+if (process.env.VITEST_WORKER_ID === undefined) {
+  run().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    if (boolInput("strict", false)) {
+      console.log(`::error::Jev triage failed: ${message}`);
+      process.exit(1);
+    }
+    warning(`Jev triage failed (fail-open): ${message}`);
+  });
+}

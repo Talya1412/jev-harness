@@ -59,6 +59,14 @@ describe("routeSkill", () => {
     await routeSkill({ apiKey: "k", fetchImpl }, "x", many, { maxCandidates: 5 });
     expect(Object.keys(seen[0].questions.best.criteria)).toHaveLength(6); // 5 + none
   });
+
+  it("throws a usage error for a candidate literally named none", async () => {
+    const { fetchImpl, seen } = jevStub({});
+    await expect(
+      routeSkill({ apiKey: "k", fetchImpl }, "x", [{ name: "none" }]),
+    ).rejects.toThrow(/reserved/);
+    expect(seen).toHaveLength(0);
+  });
 });
 
 describe("judgeDestructive", () => {
@@ -107,6 +115,14 @@ describe("pickTool", () => {
     expect(r.tool).toBeNull();
     expect(seen).toHaveLength(0);
   });
+
+  it("throws a usage error for a tool literally named none", async () => {
+    const { fetchImpl, seen } = jevStub({});
+    await expect(
+      pickTool({ apiKey: "k", fetchImpl }, { task: "x", tools: [{ name: "none", description: "d" }] }),
+    ).rejects.toThrow(/reserved/);
+    expect(seen).toHaveLength(0);
+  });
 });
 
 describe("chooseBrowserAction", () => {
@@ -148,6 +164,47 @@ describe("chooseBrowserAction", () => {
     });
     expect(r.act).toBe(false);
   });
+
+  it("caps the element list and page text, flagging truncation", async () => {
+    const { fetchImpl, seen } = jevStub({
+      operation: { type: "choice", choice: "CLICK", confidence: 0.9, probabilities: {} },
+      click_target: { type: "choice", choice: "none", confidence: 0.9, probabilities: {} },
+    });
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      index: String(i), label: "L".repeat(600), operations: ["CLICK"] as string[],
+    }));
+    const r = await chooseBrowserAction({ apiKey: "k", fetchImpl }, {
+      goal: "g",
+      page: { url: "u", text: "t".repeat(9000) },
+      elements: many,
+    });
+    expect(r.truncated).toBe(true);
+    expect(seen[0].state.elements).toHaveLength(30);
+    expect((seen[0].state.elements as Array<{ label: string }>)[0].label).toHaveLength(500);
+    expect((seen[0].state.page as { text: string }).text).toHaveLength(8000);
+  });
+
+  it("reports truncated false when nothing exceeds a cap", async () => {
+    const { fetchImpl } = jevStub({
+      operation: { type: "choice", choice: "CLICK", confidence: 0.9, probabilities: {} },
+      click_target: { type: "choice", choice: "none", confidence: 0.9, probabilities: {} },
+    });
+    const r = await chooseBrowserAction({ apiKey: "k", fetchImpl }, {
+      goal: "g", page: { url: "u", text: "short" },
+      elements: [{ index: "1", label: "L", operations: ["CLICK"] }],
+    });
+    expect(r.truncated).toBe(false);
+  });
+
+  it("throws a usage error for an element literally indexed none", async () => {
+    const { fetchImpl, seen } = jevStub({});
+    await expect(
+      chooseBrowserAction({ apiKey: "k", fetchImpl }, {
+        goal: "g", page: { url: "u" }, elements: [{ index: "none", label: "L", operations: ["CLICK"] }],
+      }),
+    ).rejects.toThrow(/reserved/);
+    expect(seen).toHaveLength(0);
+  });
 });
 
 describe("rankCandidates", () => {
@@ -166,6 +223,16 @@ describe("rankCandidates", () => {
     const r = await rankCandidates({ apiKey: "k", fetchImpl }, "task", []);
     expect(r).toEqual([]);
     expect(seen).toHaveLength(0);
+  });
+
+  it("caps the candidate list at 64", async () => {
+    const answers: JevResponse["answers"] = {};
+    for (let i = 0; i < 64; i++) answers[`fit_${i}`] = { type: "score", score: 1, confidence: 0.5, probabilities: {} };
+    const { fetchImpl, seen } = jevStub(answers);
+    const many = Array.from({ length: 80 }, (_, i) => `candidate ${i}`);
+    const r = await rankCandidates({ apiKey: "k", fetchImpl }, "task", many);
+    expect(r).toHaveLength(64);
+    expect(Object.keys(seen[0].questions)).toHaveLength(64);
   });
 });
 
@@ -236,6 +303,15 @@ describe("isDuplicate", () => {
     expect(r.duplicates).toEqual(["login test is flaky, fix it"]);
     expect(r.any).toBe(true);
     expect(r.scores[1].probability).toBe(0.11);
+  });
+
+  it("keeps per-question instructions short — the item rides in state", async () => {
+    const { fetchImpl, seen } = jevStub({ dup_0: { type: "noul", noul: 0.9 } });
+    await isDuplicate({ apiKey: "k", fetchImpl }, "x".repeat(5000), ["y".repeat(5000)]);
+    const instructions = String(seen[0].questions.dup_0.instructions);
+    expect(instructions).not.toMatch(/INCOMING/);
+    expect(instructions.length).toBeLessThan(2500);
+    expect(String(seen[0].state.item)).toHaveLength(2000);
   });
 
   it("short-circuits on an empty candidate list", async () => {

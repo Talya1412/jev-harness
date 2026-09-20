@@ -16,7 +16,8 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -31,9 +32,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jev-harness/core": "*",
-    "@jev-harness/eval": "*",
-    "@jev-harness/kit": "*"
+    "@jev-harness/core": "^0.2.0",
+    "@jev-harness/eval": "^0.2.0",
+    "@jev-harness/kit": "^0.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

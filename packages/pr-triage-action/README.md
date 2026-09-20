@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: <owner>/jev-harness/packages/pr-triage-action@main
+      - uses: Talya1412/jev-harness/packages/pr-triage-action@master
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
         env:

@@ -3,6 +3,16 @@
  * client call, so the same logic backs every harness adapter.
  */
 import { askJev, choice, noul, type JevConfig, type JevResponse } from "./client.js";
+import { JevError } from "./types.js";
+
+/** Max elements forwarded per browser snapshot (mirrors patterns-ops MAX_ITEMS). */
+const MAX_BROWSER_ELEMENTS = 30;
+/** Max chars per element label/role/value (mirrors patterns-ops MAX_ITEM_CHARS). */
+const MAX_ELEMENT_CHARS = 500;
+/** Max chars of page text forwarded (mirrors patterns-ops MAX_DIFF_CHARS scale). */
+const MAX_PAGE_TEXT_CHARS = 8_000;
+/** Max candidates ranked in one call (mirrors isDuplicate's default maxCandidates). */
+const MAX_RANK_CANDIDATES = 64;
 
 export interface SkillCandidate {
   name: string;
@@ -13,6 +23,8 @@ export interface SkillCandidate {
  * Route a request to one skill (or none). Sending DESCRIPTIONS matters:
  * with names alone, "test the login page in a browser" routes to a
  * desktop-automation skill instead of the browser-testing one.
+ * Candidate names must not be "none" — that key is reserved for the abstain
+ * option and throws a JevError.
  */
 export async function routeSkill(
   config: JevConfig,
@@ -24,6 +36,9 @@ export async function routeSkill(
   const shortlist = skills.slice(0, options.maxCandidates ?? 12);
   if (shortlist.length === 0) return { skill: null, confidence: 0, probabilities: {} };
 
+  if (shortlist.some((s) => s.name === "none")) {
+    throw new JevError('routeSkill: "none" is reserved for the abstain option; rename the skill candidate', { retryable: false });
+  }
   const criteria: Record<string, string> = { none: "No listed skill is relevant to this request" };
   const state: Record<string, string> = {};
   for (const s of shortlist) {
@@ -67,7 +82,12 @@ export async function judgeDestructive(
   return { destructive: p, blocked: p >= threshold };
 }
 
-/** Pick one browser action from a snapshot. Does not execute anything. */
+/**
+ * Pick one browser action from a snapshot. Does not execute anything.
+ * The snapshot is capped before sending (30 elements, 500 chars per
+ * element field, 8000 chars of page text); `truncated` is true when input
+ * exceeded a cap.
+ */
 export async function chooseBrowserAction(
   config: JevConfig,
   input: {
@@ -77,10 +97,26 @@ export async function chooseBrowserAction(
     recentActions?: Array<{ action: string; kind?: string; pageChanged?: boolean }>;
   },
   options: { minConfidence?: number; signal?: AbortSignal } = {},
-): Promise<{ operation: string | null; target: string | null; confidence: number; act: boolean }> {
+): Promise<{ operation: string | null; target: string | null; confidence: number; act: boolean; truncated: boolean }> {
   const minConfidence = options.minConfidence ?? 0.4;
+  const selected = input.elements.slice(0, MAX_BROWSER_ELEMENTS);
+  let truncated = input.elements.length > selected.length;
+  const capField = (s: string | undefined): string | undefined => {
+    if (s === undefined) return undefined;
+    if (s.length > MAX_ELEMENT_CHARS) truncated = true;
+    return s.slice(0, MAX_ELEMENT_CHARS);
+  };
+  const cappedElements = selected.map((e) => ({
+    ...e,
+    label: capField(e.label) ?? "",
+    role: capField(e.role),
+    value: capField(e.value),
+  }));
+  const pageText = input.page.text ?? "";
+  if (pageText.length > MAX_PAGE_TEXT_CHARS) truncated = true;
+  const cappedPage = { ...input.page, text: pageText.slice(0, MAX_PAGE_TEXT_CHARS) };
   const operations = new Set<string>();
-  for (const el of input.elements) for (const op of el.operations) operations.add(String(op).toUpperCase());
+  for (const el of cappedElements) for (const op of el.operations) operations.add(String(op).toUpperCase());
 
   const criteria: Record<string, string> = {
     CLICK: "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
@@ -102,10 +138,13 @@ export async function chooseBrowserAction(
   };
   for (const op of operations) {
     if (!["CLICK", "TYPE_TEXT", "SELECT"].includes(op)) continue;
-    const eligible = input.elements.filter((e) => e.operations.map((o) => String(o).toUpperCase()).includes(op));
+    const eligible = cappedElements.filter((e) => e.operations.map((o) => String(o).toUpperCase()).includes(op));
     if (eligible.length === 0) continue;
     // A choice needs at least two options. Add an explicit "none" escape so a
     // single eligible element still yields a valid question rather than a 400.
+    if (eligible.some((e) => e.index === "none")) {
+      throw new JevError('chooseBrowserAction: "none" is reserved for the no-target escape; rename the element index', { retryable: false });
+    }
     const targetCriteria: Record<string, string> = { none: "Do not target any element for this operation." };
     for (const e of eligible) targetCriteria[e.index] = [e.label, e.role, e.value].filter(Boolean).join(" | ");
     questions[op.toLowerCase() + "_target"] = {
@@ -117,8 +156,8 @@ export async function chooseBrowserAction(
 
   const response = await askJev(config, {
     goal: input.goal,
-    page: input.page,
-    elements: input.elements,
+    page: cappedPage,
+    elements: cappedElements,
     recent_actions: input.recentActions ?? [],
   }, questions as never, options.signal);
 
@@ -132,10 +171,14 @@ export async function chooseBrowserAction(
     } catch { target = null; }
   }
   const act = !!op.choice && op.choice !== "BLOCKED" && op.confidence >= minConfidence;
-  return { operation: op.choice ?? null, target, confidence: op.confidence, act };
+  return { operation: op.choice ?? null, target, confidence: op.confidence, act, truncated };
 }
 
-/** Select one tool (or none) and flag whether it needs confirmation. */
+/**
+ * Select one tool (or none) and flag whether it needs confirmation.
+ * Tool names must not be "none" — that key is reserved for the abstain
+ * option and throws a JevError.
+ */
 export async function pickTool(
   config: JevConfig,
   input: { task: string; tools: Array<{ name: string; description: string }>; context?: string },
@@ -144,6 +187,9 @@ export async function pickTool(
   const minConfidence = options.minConfidence ?? 0.4;
   const riskThreshold = options.riskThreshold ?? 0.5;
   if (input.tools.length === 0) return { tool: null, confidence: 0, risky: 0, confirmRequired: false, act: false };
+  if (input.tools.some((t) => t.name === "none")) {
+    throw new JevError('pickTool: "none" is reserved for the abstain option; rename the tool', { retryable: false });
+  }
 
   const criteria: Record<string, string> = { none: "No listed tool is appropriate; answer or ask the user instead." };
   for (const t of input.tools) criteria[t.name] = t.description;
@@ -163,25 +209,30 @@ export async function pickTool(
   return { tool: picked.choice ?? null, confidence: picked.confidence, risky, confirmRequired: risky >= riskThreshold, act };
 }
 
-/** Rank a list of strings against a task; returns best-first with scores. */
+/**
+ * Rank a list of strings against a task; returns best-first with scores.
+ * The candidate list is capped at 64 per call (mirrors isDuplicate) to
+ * bound the batched request; pass a pre-shortlisted list for more.
+ */
 export async function rankCandidates(
   config: JevConfig,
   task: string,
   candidates: string[],
   options: { signal?: AbortSignal } = {},
 ): Promise<Array<{ candidate: string; fitness: number }>> {
-  if (candidates.length === 0) return [];
+  const selected = candidates.slice(0, MAX_RANK_CANDIDATES);
+  if (selected.length === 0) return [];
   const questions: Record<string, unknown> = {};
   const criteria = ["Irrelevant", "Weakly related", "Relevant", "Directly on point"];
-  for (let i = 0; i < candidates.length; i++) {
+  for (let i = 0; i < selected.length; i++) {
     questions[`fit_${i}`] = {
       type: "score",
-      instructions: `How well does this candidate serve the task?\n\nTASK: ${task.slice(0, 1000)}\n\nCANDIDATE: ${candidates[i].slice(0, 1000)}`,
+      instructions: `How well does this candidate serve the task?\n\nTASK: ${task.slice(0, 1000)}\n\nCANDIDATE: ${selected[i].slice(0, 1000)}`,
       criteria,
     };
   }
   const response = await askJev(config, { task: task.slice(0, 2000) }, questions as never, options.signal);
-  const scored = candidates.map((c, i) => {
+  const scored = selected.map((c, i) => {
     let fitness = 0;
     try {
       const a = response.answers[`fit_${i}`];
@@ -290,7 +341,7 @@ export async function isDuplicate(
   for (let i = 0; i < candidates.length; i++) {
     questions[`dup_${i}`] = {
       type: "noul",
-      instructions: `Is this candidate a duplicate of the incoming item (same underlying fact, request, or content — wording may differ)?\n\nINCOMING: ${item.slice(0, 2000)}\n\nCANDIDATE: ${candidates[i].slice(0, 2000)}`,
+      instructions: `Is this candidate a duplicate of the incoming item in state (same underlying fact, request, or content — wording may differ)?\n\nCANDIDATE: ${candidates[i].slice(0, 2000)}`,
     };
   }
   const response = await askJev(config, { item: item.slice(0, 2000) }, questions as never, options.signal);

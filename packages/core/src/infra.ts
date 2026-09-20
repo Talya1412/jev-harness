@@ -7,7 +7,7 @@
  * composes with every harness adapter without touching decision code — the
  * same separation AGENTS.md enforces for patterns.
  */
-import { askJev } from "./client.js";
+import { askJev, validateQuestions } from "./client.js";
 import type {
   Answer,
   JevConfig,
@@ -39,9 +39,15 @@ export function withCache(config: JevConfig, opts: CacheOptions = {}): JevConfig
   const parent = config.fetchImpl ?? fetch;
 
   const wrapped: typeof fetch = async (url, init) => {
+    // The models endpoint is keyed by auth, not body — a shared body-keyed
+    // cache would serve one key's model list to another. Pass it through.
+    if (String(url).endsWith("/v1/models")) return parent(url, init);
     const key = String(url) + "\n" + String(init?.body ?? "");
     const hit = cache.get(key);
     if (hit !== undefined) {
+      // True LRU: refresh recency on hit so hot entries survive.
+      cache.delete(key);
+      cache.set(key, hit);
       opts.onHit?.(key);
       return new Response(hit, {
         status: 200,
@@ -99,19 +105,18 @@ export function jevBatch(config: JevConfig, state: unknown, signal?: AbortSignal
     const snapshot = pending.splice(0);
     if (snapshot.length === 0) return { model: "jev-batch", answers: {} };
 
-    const merged: Record<string, Question> = {};
-    const maps = snapshot.map((s, i): { prefix: string; orig: string[]; resolve: Pending["resolve"]; reject: Pending["reject"] } => {
-      const prefix = `c${i}__`;
-      const orig: string[] = [];
-      for (const [k, q] of Object.entries(s.questions)) {
-        const nk = prefix + k;
-        merged[nk] = q as Question;
-        orig.push(k);
-      }
-      return { prefix, orig, resolve: s.resolve, reject: s.reject };
-    });
-
     try {
+      const merged: Record<string, Question> = {};
+      const maps = snapshot.map((s, i): { prefix: string; orig: string[]; resolve: Pending["resolve"]; reject: Pending["reject"] } => {
+        const prefix = `c${i}__`;
+        const orig: string[] = [];
+        for (const [k, q] of Object.entries(s.questions)) {
+          const nk = prefix + k;
+          merged[nk] = q as Question;
+          orig.push(k);
+        }
+        return { prefix, orig, resolve: s.resolve, reject: s.reject };
+      });
       const response = await askJev(config, state, merged as unknown as Questions, signal);
       for (const { prefix, orig, resolve } of maps) {
         const answers: Record<string, Answer> = {};
@@ -123,7 +128,10 @@ export function jevBatch(config: JevConfig, state: unknown, signal?: AbortSignal
       }
       return response;
     } catch (err) {
-      for (const { reject } of maps) reject(err);
+      // Route the failure to every queued caller so all promises settle;
+      // the direct flush() caller still observes it via the rethrow, while
+      // the scheduled fire-and-forget path has its own catch below.
+      for (const { reject } of snapshot) reject(err);
       throw err;
     }
   }
@@ -137,6 +145,9 @@ export function jevBatch(config: JevConfig, state: unknown, signal?: AbortSignal
     // would be noise rather than signal. Callers that want the error must use
     // the returned `flush()` directly.
     queueMicrotask(() => {
+      // flush() already rejects every queued caller on failure; this catch
+      // only settles the fire-and-forget promise itself (direct flush()
+      // callers still receive the error via their own await).
       void flush().catch(() => {});
     });
   }
@@ -144,6 +155,14 @@ export function jevBatch(config: JevConfig, state: unknown, signal?: AbortSignal
   return {
     add(questions) {
       return new Promise<JevResponse>((resolve, reject) => {
+        // Validate up front so misuse rejects this caller with a typed usage
+        // error instead of failing the whole merged batch inside flush.
+        try {
+          validateQuestions(questions);
+        } catch (err) {
+          reject(err);
+          return;
+        }
         pending.push({ questions, resolve, reject });
         schedule();
       });
@@ -178,11 +197,13 @@ export interface AuditLog {
  * "advisory" outputs feed a process that can be audited. In-memory by default;
  * pass a `sink` to mirror to a file, OTel, or your DB.
  */
-export function createAuditLog(opts: { sink?: (e: AuditEntry) => void } = {}): AuditLog {
+export function createAuditLog(opts: { sink?: (e: AuditEntry) => void; maxEntries?: number } = {}): AuditLog {
+  const maxEntries = Math.max(1, opts.maxEntries ?? 1000);
   const entries: AuditEntry[] = [];
   return {
     record(e) {
       entries.push(e);
+      if (entries.length > maxEntries) entries.splice(0, entries.length - maxEntries);
       opts.sink?.(e);
     },
     all() {

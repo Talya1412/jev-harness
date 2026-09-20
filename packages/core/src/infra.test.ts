@@ -51,6 +51,39 @@ describe("withCache", () => {
     expect(fetchCalls).toBe(2);
   });
 
+  it("refreshes recency on hit (true LRU)", async () => {
+    let fetchCalls = 0;
+    const base = (async () => {
+      fetchCalls++;
+      return new Response(JSON.stringify({ model: "m", answers: { q: { type: "noul", noul: 0.5 } } }), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch;
+    const cfg = withCache({ apiKey: "k", fetchImpl: base }, { maxEntries: 2 });
+    const q = { q: { type: "noul", instructions: "?" } };
+    await askJev(cfg, { x: 1 }, q); // [1]
+    await askJev(cfg, { x: 2 }, q); // [1, 2]
+    await askJev(cfg, { x: 1 }, q); // hit: refresh -> [2, 1]
+    await askJev(cfg, { x: 3 }, q); // evicts 2, not 1
+    expect(fetchCalls).toBe(3);
+    await askJev(cfg, { x: 1 }, q); // still cached
+    expect(fetchCalls).toBe(3);
+    await askJev(cfg, { x: 2 }, q); // evicted -> refetch
+    expect(fetchCalls).toBe(4);
+  });
+
+  it("does not serve /v1/models from the body cache", async () => {
+    let fetchCalls = 0;
+    const base = (async () => {
+      fetchCalls++;
+      return new Response(JSON.stringify({ models: [{ name: "m" }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const cfg = withCache({ apiKey: "k", fetchImpl: base });
+    await cfg.fetchImpl!("https://api.typesafe.ai/v1/models", { headers: {} });
+    await cfg.fetchImpl!("https://api.typesafe.ai/v1/models", { headers: {} });
+    expect(fetchCalls).toBe(2);
+  });
+
   it("evicts the oldest entry once full", async () => {
     let fetchCalls = 0;
     const base = (async () => {
@@ -101,6 +134,15 @@ describe("jevBatch", () => {
     const p2 = batch.add({ q: { type: "noul", instructions: "?" } });
     await expect(p1).rejects.toThrow();
     await expect(p2).rejects.toThrow();
+  });
+
+  it("rejects an invalid question map at add() time without poisoning the batch", async () => {
+    const { fetchImpl, calls } = jevStub({ c0__ok: { type: "noul", noul: 0.5 } });
+    const batch = jevBatch({ apiKey: "k", fetchImpl }, { s: 1 });
+    await expect(batch.add({} as Parameters<typeof batch.add>[0])).rejects.toThrow(/non-empty/);
+    const good = await batch.add({ ok: { type: "noul", instructions: "?" } });
+    expect(good.answers.ok).toBeDefined();
+    expect(calls).toHaveLength(1);
   });
 
   it("flush with no pending callers resolves to an empty answers object", async () => {
@@ -162,6 +204,15 @@ describe("createAuditLog + withAudit", () => {
     const cfg = withAudit({ apiKey: "k", fetchImpl }, log);
     await askJev(cfg, { x: 1 }, { q: { type: "noul", instructions: "?" } });
     expect(sink).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps retained entries at maxEntries", async () => {
+    const log = createAuditLog({ maxEntries: 2 });
+    log.record({ ts: 1, url: "u", ok: true, elapsedMs: 0 });
+    log.record({ ts: 2, url: "u", ok: true, elapsedMs: 0 });
+    log.record({ ts: 3, url: "u", ok: true, elapsedMs: 0 });
+    expect(log.size()).toBe(2);
+    expect(log.all().map((e) => e.ts)).toEqual([2, 3]);
   });
 
   it("drain clears the log", async () => {

@@ -26,6 +26,7 @@ describe("redactText", () => {
     ["url credential", "https://host/db?password=hunter2&x=1", "https://host/db?password=[REDACTED]&x=1"],
     ["connection string", "postgres://admin:s3cret@db.internal:5432/app", "[REDACTED-connstring]@db.internal:5432/app"],
     ["email", "ping jane.doe+ops@example.co.uk today", "ping [REDACTED:email] today"],
+    ["google api key", "key AIza" + "SyB1a2c3d4e5f6g7h8i9j0k1l2m3n4o5p67", "key [REDACTED:google-api-key]"],
   ])("redacts %s", (_name, input, expected) => {
     expect(redactText(input)).toBe(expected);
   });
@@ -70,6 +71,22 @@ describe("redactState", () => {
     expect(out.count).toBe(3);
     expect(out.flag).toBe(true);
     expect(out.nothing).toBeNull();
+  });
+
+  it("preserves Date/Map/Set/class instances instead of corrupting them", () => {
+    const date = new Date("2026-09-20T00:00:00.000Z");
+    const out = redactState({ d: date, m: new Map([["k", "v AKIAIOSFODNN7EXAMPLE"]]), s: new Set(["a@b.example"]), n: 1 }) as {
+      d: unknown; m: unknown; s: unknown; n: unknown;
+    };
+    // Date keeps its ISO content (JSON.stringify semantics), Map/Set keep entries.
+    expect(out.d).toBe("2026-09-20T00:00:00.000Z");
+    expect(out.m).toEqual([["k", expect.stringContaining("[REDACTED:aws-access-key]")]]);
+    expect(out.s).toEqual([expect.stringContaining("[REDACTED:email]")]);
+    expect(out.n).toBe(1);
+    // no-redact baseline really does serialize these shapes
+    expect(JSON.parse(JSON.stringify({ d: date })).d).toBe("2026-09-20T00:00:00.000Z");
+    class Point { constructor(public x = 1) {} toString() { return "point(1)"; } }
+    expect(redactState({ p: new Point() })).toEqual({ p: "point(1)" });
   });
 
   it("does not mutate the input", () => {

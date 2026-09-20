@@ -37,7 +37,7 @@ From the Pi agent directory (global install):
 # from a checkout of jev-harness
 pi install ./packages/pi
 # or by git URL once published
-pi install git:github.com/<org>/jev-harness
+pi install git:github.com/Talya1412/jev-harness
 ```
 
 For one run without installing:
@@ -46,7 +46,7 @@ For one run without installing:
 pi -e ./packages/pi
 ```
 
-Requires Node >= 18 (Pi itself targets Node 24.18; see the reference repo).
+Requires Node >= 20 (Pi itself targets Node 24.18; see the reference repo).
 
 ## Environment
 

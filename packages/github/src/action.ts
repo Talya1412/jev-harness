@@ -5,7 +5,7 @@
  * Jev outage, or a missing `gh` never fails the workflow — the comment is
  * still posted (or printed) so the PR isn't blocked.
  */
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -71,7 +71,8 @@ function postComment(prNumber: string, body: string): boolean {
     const dir = mkdtempSync(join(tmpdir(), "jev-review-"));
     const file = join(dir, "comment.md");
     writeFileSync(file, body, "utf8");
-    execSync(`gh pr comment ${JSON.stringify(prNumber)} --body-file ${JSON.stringify(file)}`, {
+    // argv (no shell) so a hostile prNumber or file path cannot inject flags or commands.
+    execFileSync("gh", ["pr", "comment", prNumber, "--body-file", file], {
       stdio: "inherit",
     });
     return true;

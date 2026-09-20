@@ -1,6 +1,6 @@
 {
   "name": "jev-harness",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeSafe Jev (System One) judgments for Claude Code: destructive-tool gating and skill routing.",
   "author": "jev-harness contributors",
   "license": "Apache-2.0",

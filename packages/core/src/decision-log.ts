@@ -106,7 +106,15 @@ export function createDecisionLog(opts: DecisionLogOptions = {}): DecisionLog {
 
 /** Stable digest for (kind, state, question ids). */
 export function decisionDigest(kind: string, state: unknown, questionIds: readonly string[]): string {
-  return fnv1a(kind + "\n" + stableStringify(state) + "\n" + [...questionIds].sort().join(","));
+  let canon: string;
+  try {
+    canon = stableStringify(state);
+  } catch {
+    // Circular state cannot be canonicalized; mark it so equal-kind circular
+    // states still digest deterministically instead of throwing RangeError.
+    canon = '{"circular":true}';
+  }
+  return fnv1a(kind + "\n" + canon + "\n" + [...questionIds].sort().join(","));
 }
 
 /**

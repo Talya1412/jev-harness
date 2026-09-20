@@ -2,11 +2,17 @@
  * Budget guard: cap how many Jev requests a process may issue per rolling
  * window (and in its lifetime). A hook firing on every tool call can burn
  * through requests when a session goes sideways; the guard turns runaway
- * loops into a loud, retryable-looking error instead of a silent bill.
+ * loops into a loud, non-retryable error instead of a silent bill.
+ * (Non-retryable deliberately: retrying a budget rejection can never succeed
+ * until the window slides or the guard is reset.)
  *
  * Wrap the config once at adapter startup and pass the wrapped config to
  * everything. The guard counts transport attempts (retries included), so the
  * numbers match what the API actually sees.
+ *
+ * Composition order: apply caching OUTSIDE the budget
+ * (`withCache(guard.wrap(config))`) so cache hits are served before they
+ * reach the guard and never consume budget.
  */
 import { JevError, type JevConfig } from "./types.js";
 

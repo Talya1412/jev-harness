@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { askJev, validateQuestions, noul, choice, score, JevError } from "../src/client.js";
+import { askJev, listJevModels, validateQuestions, noul, choice, score, JevError } from "../src/client.js";
 import type { JevResponse } from "../src/types.js";
 
 /** A fetch stub that returns a canned response and records the request. */
@@ -108,6 +108,59 @@ describe("askJev", () => {
       controller.signal,
     )).rejects.toThrow(/aborted/);
     expect(n).toBe(1);
+  });
+});
+
+describe("listJevModels", () => {
+  it("returns the model list", async () => {
+    const { impl } = stubFetch({ models: [{ name: "jev-latest" }] });
+    const models = await listJevModels({ apiKey: "k", fetchImpl: impl });
+    expect(models).toEqual([{ name: "jev-latest" }]);
+  });
+
+  it("throws JevError when the body has no models array", async () => {
+    const { impl } = stubFetch({ nope: true });
+    await expect(listJevModels({ apiKey: "k", fetchImpl: impl, maxAttempts: 1 })).rejects.toThrow(/missing `models`/);
+  });
+
+  it("retries a 429 then succeeds", async () => {
+    let n = 0;
+    const impl = (async () => {
+      n++;
+      if (n === 1) return new Response("slow down", { status: 429 });
+      return new Response(JSON.stringify({ models: [{ name: "m" }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const models = await listJevModels({ apiKey: "k", fetchImpl: impl });
+    expect(n).toBe(2);
+    expect(models).toEqual([{ name: "m" }]);
+  });
+
+  it("does not retry a 400", async () => {
+    let n = 0;
+    const impl = (async () => { n++; return new Response("bad", { status: 400 }); }) as unknown as typeof fetch;
+    await expect(listJevModels({ apiKey: "k", fetchImpl: impl }, undefined)).rejects.toThrow(/400/);
+    expect(n).toBe(1);
+  });
+
+  it("honors an aborted signal without firing a request", async () => {
+    let n = 0;
+    const impl = (async () => { n++; return new Response("{}", { status: 200 }); }) as unknown as typeof fetch;
+    const controller = new AbortController();
+    controller.abort();
+    await expect(listJevModels({ apiKey: "k", fetchImpl: impl }, controller.signal)).rejects.toThrow(/aborted/);
+    expect(n).toBe(0);
+  });
+
+  it("aborts a hung models call at the configured timeout", async () => {
+    const impl = ((_url: unknown, init?: RequestInit) => new Promise((_res, rej) => {
+      init?.signal?.addEventListener("abort", () => {
+        const e = new Error("aborted");
+        e.name = "AbortError";
+        rej(e);
+      });
+    })) as unknown as typeof fetch;
+    await expect(listJevModels({ apiKey: "k", fetchImpl: impl, timeoutMs: 10, maxAttempts: 1 })).rejects.toThrow();
+    await expect(listJevModels({ apiKey: "k", fetchImpl: impl, timeoutMs: 10, maxAttempts: 1 })).rejects.toThrow();
   });
 });
 

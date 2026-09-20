@@ -154,14 +154,70 @@ export async function askJev(
 }
 
 /** List the models available to the configured key. */
-export async function listJevModels(config: JevConfig): Promise<Array<{ name: string; description?: string }>> {
+export async function listJevModels(
+  config: JevConfig,
+  signal?: AbortSignal,
+): Promise<Array<{ name: string; description?: string }>> {
   const cfg = resolveConfig(config);
-  const res = await cfg.fetchImpl(cfg.baseUrl + "/v1/models", {
-    headers: { Authorization: "Bearer " + cfg.apiKey },
-  });
-  if (!res.ok) throw new JevError(`Jev models HTTP ${res.status}`, { status: res.status });
-  const body = (await res.json()) as { models?: Array<{ name: string; description?: string }> };
-  return body.models ?? [];
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    if (signal?.aborted) {
+      const abortErr = new Error("Jev models call aborted");
+      abortErr.name = "AbortError";
+      throw abortErr;
+    }
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
+    try {
+      const res = await cfg.fetchImpl(cfg.baseUrl + "/v1/models", {
+        headers: { Authorization: "Bearer " + cfg.apiKey },
+        signal: controller.signal,
+      });
+      if (res.status === 429 || res.status >= 500) {
+        const text = await res.text().catch(() => "");
+        lastError = new JevError(`Jev models HTTP ${res.status}: ${text.slice(0, 300)}`, {
+          status: res.status,
+          retryable: true,
+        });
+        if (attempt < cfg.maxAttempts) {
+          cfg.onRetry?.(attempt, lastError);
+          await sleep(250 * attempt * attempt);
+          continue;
+        }
+        throw lastError;
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new JevError(`Jev models HTTP ${res.status}: ${text.slice(0, 500)}`, {
+          status: res.status,
+          retryable: false,
+        });
+      }
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        throw new JevError("Jev models returned malformed JSON", { retryable: false });
+      }
+      const models = (body as { models?: unknown })?.models;
+      if (!Array.isArray(models)) throw new JevError("Jev models response is missing `models`", { retryable: false });
+      return models as Array<{ name: string; description?: string }>;
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      if (e instanceof JevError && !e.retryable) throw e;
+      lastError = e;
+      const transient = e.name === "AbortError" || /fetch failed|ECONN|network|timeout|aborted/i.test(e.message);
+      if (!transient || attempt === cfg.maxAttempts) throw e;
+      cfg.onRetry?.(attempt, e);
+      await sleep(250 * attempt * attempt);
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
+  }
+  throw lastError ?? new JevError("Jev models call failed", { retryable: false });
 }
 
 // --- Typed accessors. Each throws when the answer is missing or malformed,

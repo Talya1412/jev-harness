@@ -50,10 +50,10 @@ function appendSummary(text: string): void {
   if (file) appendFileSync(file, text + "\n");
 }
 
-async function githubFetch(path: string, init: RequestInit = {}, accept?: string): Promise<Response> {
+export async function githubFetch(path: string, init: RequestInit = {}, accept?: string): Promise<Response> {
   const base = env("GITHUB_API_URL") || "https://api.github.com";
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${env("GITHUB_TOKEN")}`,
+    Authorization: `Bearer ${env("INPUT_GITHUB_TOKEN") || env("GITHUB_TOKEN")}`,
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "jev-harness-gate",
     "Content-Type": "application/json",
@@ -160,11 +160,14 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err);
-  if (boolInput("strict", false)) {
-    console.log(`::error::Jev gate failed: ${message}`);
-    process.exit(1);
-  }
-  warning(`Jev gate failed (fail-open): ${message}`);
-});
+// Guarded so unit tests can import helpers without firing the action.
+if (process.env.VITEST_WORKER_ID === undefined) {
+  run().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    if (boolInput("strict", false)) {
+      console.log(`::error::Jev gate failed: ${message}`);
+      process.exit(1);
+    }
+    warning(`Jev gate failed (fail-open): ${message}`);
+  });
+}

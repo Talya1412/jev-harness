@@ -163,6 +163,12 @@ export function withPersistentCache(config: JevConfig, cache: JevCache): JevConf
     if (!target.endsWith("/v1/systemone") || init?.method?.toUpperCase() !== "POST") {
       return parent(url, init);
     }
+    // Only string bodies are cacheable: String() would collapse every
+    // non-string body (ReadableStream, FormData, ...) to the same
+    // "[object ...]" text and serve one caller's response to another.
+    if (init?.body !== undefined && typeof init.body !== "string") {
+      return parent(url, init);
+    }
     const key = target + "\n" + String(init.body ?? "");
     try {
       const hit = cache.get(key);

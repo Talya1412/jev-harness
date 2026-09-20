@@ -72,6 +72,15 @@ describe("createBudgetGuard", () => {
     expect(seen).toEqual([{ reason: "window", used: 1, limit: 1 }]);
   });
 
+  it("does not treat budget exhaustion as retryable", async () => {
+    const guard = createBudgetGuard({ maxPerWindow: 1, windowMs: 60_000 });
+    const cfg = guard.wrap({ apiKey: "k", fetchImpl: okFetch() });
+    await askJev(cfg, "s", QUESTIONS);
+    const err = await askJev(cfg, "s", QUESTIONS).catch((e) => e);
+    expect(err).toBeInstanceOf(JevError);
+    expect((err as JevError).retryable).toBe(false);
+  });
+
   it("reset clears everything", async () => {
     const guard = createBudgetGuard({ maxPerWindow: 1, windowMs: 60_000 });
     const cfg = guard.wrap({ apiKey: "k", fetchImpl: okFetch() });

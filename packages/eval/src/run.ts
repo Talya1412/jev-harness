@@ -23,8 +23,18 @@ import {
   type SweepRow,
 } from "./metrics.js";
 
-/** Jev input pricing used for the cost estimate in reports. */
+/**
+ * Jev input pricing ($/Mtok) used for the cost estimate in reports.
+ * Single source of truth — scripts/record-baseline.mjs imports this too.
+ * Output is free ($0), so only input tokens feed the estimate.
+ */
 export const INPUT_USD_PER_MTOK = 0.042;
+export const OUTPUT_USD_PER_MTOK = 0;
+
+/** Cost estimate for a run: input tokens are billed, output tokens are free. */
+export function estimateCostUsd(inputTokens: number, _outputTokens = 0): number {
+  return (inputTokens * INPUT_USD_PER_MTOK + _outputTokens * OUTPUT_USD_PER_MTOK) / 1_000_000;
+}
 
 export interface EvalOptions {
   /** Parallel cases in flight. Default 4. */
@@ -69,9 +79,18 @@ export async function runEval(config: JevConfig, dataset: EvalDataset, opts: Eva
   const cases = dataset.cases;
   const results: Array<{ ok: boolean; response?: JevResponse; error?: string }> = new Array(cases.length);
 
+  // An aborted run must not masquerade as N case errors with a full report.
+  if (opts.signal?.aborted) {
+    throw new Error("eval run aborted before any case started");
+  }
   let cursor = 0;
+  let aborted = false;
   const worker = async (): Promise<void> => {
     while (cursor < cases.length) {
+      if (opts.signal?.aborted) {
+        aborted = true;
+        return;
+      }
       const index = cursor++;
       const kase = cases[index]!;
       try {
@@ -82,6 +101,9 @@ export async function runEval(config: JevConfig, dataset: EvalDataset, opts: Eva
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(cases.length, 1)) }, worker));
+  if (aborted || opts.signal?.aborted) {
+    throw new Error("eval run aborted");
+  }
 
   const errors: EvalReport["errors"] = [];
   let inputTokens = 0;
@@ -89,8 +111,9 @@ export async function runEval(config: JevConfig, dataset: EvalDataset, opts: Eva
   let requests = 0;
   for (let i = 0; i < cases.length; i++) {
     const r = results[i]!;
+    // Every dispatched case is one askJev attempt, ok or failed.
+    requests++;
     if (r.ok && r.response) {
-      requests++;
       inputTokens += r.response.usage?.input_tokens ?? 0;
       outputTokens += r.response.usage?.output_tokens ?? 0;
     } else {
@@ -169,7 +192,7 @@ export async function runEval(config: JevConfig, dataset: EvalDataset, opts: Eva
       requests,
       inputTokens,
       outputTokens,
-      estimatedCostUsd: (inputTokens * INPUT_USD_PER_MTOK) / 1_000_000,
+      estimatedCostUsd: estimateCostUsd(inputTokens, outputTokens),
     },
     metrics,
     errors,

@@ -157,10 +157,46 @@ describe("runCli", () => {
     expect(JSON.parse(cap.read().out)).toEqual([{ name: "jev-latest", description: "d" }]);
   });
 
+  it("caps --timeout-ms at 2^31-1 instead of overflowing setTimeout", async () => {
+    process.env.TYPESAFE_API_KEY = "k";
+    const { impl } = echoFetch();
+    const cap = capture();
+    const code = await runCli(
+      [
+        "ask",
+        "--questions",
+        '{"q":{"type":"noul","instructions":"ok?"}}',
+        "--timeout-ms",
+        "99999999999",
+      ],
+      { fetchImpl: impl, ...cap.io },
+    );
+    expect(code).toBe(0);
+    const bad = capture();
+    expect(
+      await runCli(["ask", "--questions", '{"q":{"type":"noul","instructions":"ok?"}}', "--timeout-ms", "0"], {
+        fetchImpl: impl,
+        ...bad.io,
+      }),
+    ).toBe(2);
+  });
+
   it("prints usage for jev eval --help without a key", async () => {
     const cap = capture();
     const code = await runCli(["eval", "--help"], { ...cap.io });
     expect(code).toBe(0);
     expect(cap.read().out).toMatch(/jev-eval/);
+  });
+
+  it("propagates the eval exit code instead of always exiting 0", async () => {
+    process.env.TYPESAFE_API_KEY = "k";
+    // Missing --dataset is a usage error: jev eval must surface exit 2,
+    // not swallow it as 0 the way the old `await runEvalCli(argv); return 0` did.
+    const missing = capture();
+    expect(await runCli(["eval"], { ...missing.io })).toBe(2);
+    expect(missing.read().err).toMatch(/--dataset is required/);
+    // Unknown eval flag is also a usage error, propagated through.
+    const bad = capture();
+    expect(await runCli(["eval", "--nope"], { ...bad.io })).toBe(2);
   });
 });

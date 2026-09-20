@@ -161,6 +161,14 @@ describe("chooseSubagent", () => {
     expect(r.subagent).toBeNull();
   });
 
+  it("throws a usage error for a subagent literally named none", async () => {
+    const { fetchImpl, seen } = jevStub({});
+    await expect(
+      chooseSubagent({ apiKey: "k", fetchImpl }, { task: "x", subagents: [{ name: "none" }] }),
+    ).rejects.toThrow(/reserved/);
+    expect(seen).toHaveLength(0);
+  });
+
   it("returns nothing for an empty subagent list without calling Jev", async () => {
     const { fetchImpl, seen } = jevStub({});
     const r = await chooseSubagent({ apiKey: "k", fetchImpl }, { task: "x", subagents: [] });

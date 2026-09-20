@@ -14,7 +14,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { askJev } from "@jev-harness/core";
-import { binaryMetrics, loadDataset, reliabilityBins, thresholdSweep } from "@jev-harness/eval";
+import {
+  binaryMetrics,
+  estimateCostUsd,
+  INPUT_USD_PER_MTOK,
+  loadDataset,
+  reliabilityBins,
+  thresholdSweep,
+} from "@jev-harness/eval";
 
 const [, , datasetPathArg = "packages/eval/golden/destructive-gate.json", questionIdArg = "destructive"] = process.argv;
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -80,9 +87,11 @@ const baseline = {
   },
   sweep: sweep.rows.map((r) => ({ threshold: r.threshold, f1: r.f1, youdenJ: r.youdenJ })),
   reliability: reliabilityBins(pairs),
-  perCase,
+  // Concurrent pushes race, so sort by id: identical re-records must diff clean.
+  perCase: perCase.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
   inputTokens,
-  estimatedCostUsd: (inputTokens * 0.042) / 1_000_000,
+  inputUsdPerMtok: INPUT_USD_PER_MTOK,
+  estimatedCostUsd: estimateCostUsd(inputTokens),
 };
 
 const outPath = datasetPath.replace(/\.json$/, ".baseline.json");

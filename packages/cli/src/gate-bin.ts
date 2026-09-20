@@ -7,8 +7,10 @@
  * only does I/O and process control.
  */
 import { askJev, noul } from "@jev-harness/core";
+import { parseTimeoutMs } from "@jev-harness/kit";
 import {
   EXIT_ERROR,
+  EXIT_FAIL,
   EXIT_PASS,
   HELP,
   type GateReport,
@@ -64,12 +66,12 @@ async function main(): Promise<number> {
     return EXIT_ERROR;
   }
 
-  const timeoutRaw = Number(process.env.JEV_TIMEOUT_MS ?? "");
+  const timeoutMs = parseTimeoutMs(process.env.JEV_TIMEOUT_MS) ?? DEFAULT_TIMEOUT_MS;
   const config = {
     apiKey,
     baseUrl: (process.env.TYPESAFE_BASE_URL ?? "").trim() || undefined,
     model: options.model ?? ((process.env.TYPESAFE_DEFAULT_MODEL ?? "").trim() || undefined),
-    timeoutMs: Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : DEFAULT_TIMEOUT_MS,
+    timeoutMs,
   } as { apiKey: string; baseUrl?: string; model?: string; timeoutMs: number };
 
   const started = Date.now();
@@ -92,7 +94,7 @@ async function main(): Promise<number> {
       elapsedMs: Date.now() - started,
     };
     process.stdout.write(formatReport(report, options.json) + "\n");
-    return report.passed ? EXIT_PASS : 1;
+    return report.passed ? EXIT_PASS : EXIT_FAIL;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const report: GateReport = {
@@ -104,7 +106,8 @@ async function main(): Promise<number> {
       error: msg,
     };
     process.stdout.write(formatReport(report, options.json) + "\n");
-    return options.failOpen ? EXIT_PASS : EXIT_ERROR;
+    // A Jev/server error is operational (1); usage errors exit 2 above.
+    return options.failOpen ? EXIT_PASS : EXIT_FAIL;
   }
 }
 

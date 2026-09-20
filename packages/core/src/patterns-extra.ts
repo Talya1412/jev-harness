@@ -6,7 +6,7 @@
  * JSON you immediately parse.
  */
 import { askJev, noul, choice, score } from "./client.js";
-import type { JevConfig } from "./types.js";
+import { JevError, type JevConfig } from "./types.js";
 
 // ---------------- safety & verification ----------------
 
@@ -182,6 +182,8 @@ export interface SubagentResult {
  * Decide whether to delegate, and to which specialist subagent. Asks both in
  * one call (delegate noul + pick choice) — batching is nearly free, and the
  * two judgments are independent against the same state.
+ * Subagent names must not be "none" — that key is reserved for the
+ * inline-handling option and throws a JevError.
  */
 export async function chooseSubagent(
   config: JevConfig,
@@ -193,6 +195,9 @@ export async function chooseSubagent(
   const shortlist = input.subagents.slice(0, 12);
   if (shortlist.length === 0) {
     return { delegate: 0, shouldDelegate: false, subagent: null, confidence: 0 };
+  }
+  if (shortlist.some((s) => s.name === "none")) {
+    throw new JevError('chooseSubagent: "none" is reserved for the inline-handling option; rename the subagent', { retryable: false });
   }
   const criteria: Record<string, string> = {
     none: "No listed subagent is the right fit; handle inline.",

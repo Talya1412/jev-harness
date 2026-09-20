@@ -31,6 +31,26 @@ describe("withFailMode", () => {
     expect(r).toBe("deny");
   });
 
+  it("still applies the policy when onError itself throws", async () => {
+    const open = await withFailMode(
+      "open",
+      async () => { throw new Error("jev down"); },
+      { open: "allow", closed: "deny", onError: () => { throw new Error("observer down"); } },
+    );
+    expect(open).toBe("allow");
+    const closed = await withFailMode(
+      "closed",
+      async () => { throw new Error("jev down"); },
+      { open: "allow", closed: "deny", onError: () => { throw new Error("observer down"); } },
+    );
+    expect(closed).toBe("deny");
+    await expect(
+      withFailMode("throw", async () => { throw new Error("boom"); }, {
+        open: "allow", closed: "deny", onError: () => { throw new Error("observer down"); },
+      }),
+    ).rejects.toThrow("boom");
+  });
+
   it("rethrows in throw mode", async () => {
     await expect(
       withFailMode(

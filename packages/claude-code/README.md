@@ -16,7 +16,7 @@ Claude Code sessions:
 Add the marketplace, then install the plugin:
 
 ```sh
-claude plugin marketplace add <owner>/jev-harness
+claude plugin marketplace add Talya1412/jev-harness
 claude plugin install jev-harness@jev-harness
 ```
 

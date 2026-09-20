@@ -15,6 +15,16 @@ import { loadDataset } from "./dataset.js";
 import { runEval } from "./run.js";
 import { formatReport } from "./report.js";
 
+export interface EvalCliIo {
+  out(s: string): void;
+  err(s: string): void;
+}
+
+/** Exit-code taxonomy: 0 = success, 1 = case failures, 2 = usage errors. */
+export const EVAL_EXIT_OK = 0;
+export const EVAL_EXIT_FAILED = 1;
+export const EVAL_EXIT_USAGE = 2;
+
 interface CliArgs {
   dataset?: string;
   questions?: string;
@@ -25,6 +35,7 @@ interface CliArgs {
   concurrency?: number;
   sweepSteps?: number;
   noSweep?: boolean;
+  noFail?: boolean;
   help?: boolean;
 }
 
@@ -44,7 +55,10 @@ Options:
   --concurrency <n>     Cases in flight (default 4).
   --no-sweep            Skip the threshold sweep for noul questions.
   --sweep-steps <n>     Sweep resolution (default 20).
+  --no-fail             Exit 0 even when cases failed (exploratory runs).
   -h, --help            Show this help.
+
+Exits 0 when every case passed, 1 when cases failed, 2 on usage errors.
 
 Labels: noul -> true/false or "yes"/"no"; choice -> criteria key; score -> level name or 0-based index.`;
 
@@ -63,6 +77,7 @@ function parseArgs(argv: string[]): CliArgs {
       case "--concurrency": args.concurrency = Number(next()); break;
       case "--sweep-steps": args.sweepSteps = Number(next()); break;
       case "--no-sweep": args.noSweep = true; break;
+      case "--no-fail": args.noFail = true; break;
       case "-h": case "--help": args.help = true; break;
       default: throw new Error(`unknown flag: ${flag} (see --help)`);
     }
@@ -71,52 +86,79 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 /**
- * Run the eval CLI against the given argv (no process.argv / process.exit
- * side effects except explicit usage-error exits). Throws on failure; the
- * caller decides how to surface it.
+ * Run the eval CLI against the given argv. Returns the process exit code
+ * (0 all passed / 1 case failures / 2 usage error) and never calls
+ * process.exit; output goes through the injectable sinks so tests can
+ * capture it and `jev eval` can propagate the code.
  */
-export async function runEvalCli(argv: string[]): Promise<void> {
+export async function runEvalCli(argv: string[], io: Partial<EvalCliIo> = {}): Promise<number> {
+  const sinks: EvalCliIo = {
+    out: io.out ?? ((s) => process.stdout.write(s)),
+    err: io.err ?? ((s) => process.stderr.write(s)),
+  };
   let args: CliArgs;
   try {
     args = parseArgs(argv);
   } catch (err) {
-    console.error((err as Error).message);
-    process.exit(2);
+    sinks.err((err as Error).message + "\n");
+    return EVAL_EXIT_USAGE;
   }
 
   if (args.help) {
-    console.log(USAGE);
-    return;
+    sinks.out(USAGE + "\n");
+    return EVAL_EXIT_OK;
   }
   if (!args.dataset) {
-    console.error("--dataset is required (see --help)");
-    process.exit(2);
+    sinks.err("--dataset is required (see --help)\n");
+    return EVAL_EXIT_USAGE;
   }
 
   const apiKey = (process.env.TYPESAFE_API_KEY ?? "").trim();
   if (!apiKey) {
-    console.error("TYPESAFE_API_KEY is not set. Export it or run with it in the environment.");
-    process.exit(2);
+    sinks.err("TYPESAFE_API_KEY is not set. Export it or run with it in the environment.\n");
+    return EVAL_EXIT_USAGE;
   }
 
-  const dataset = loadDataset(args.dataset);
+  let dataset;
+  try {
+    dataset = loadDataset(args.dataset);
+  } catch (err) {
+    sinks.err((err instanceof Error ? err.message : String(err)) + "\n");
+    return EVAL_EXIT_USAGE;
+  }
   if (args.questions) {
-    const extra = JSON.parse(readFileSync(args.questions, "utf8")) as Questions;
+    let extra: Questions;
+    try {
+      extra = JSON.parse(readFileSync(args.questions, "utf8")) as Questions;
+    } catch (err) {
+      sinks.err((err instanceof Error ? err.message : String(err)) + "\n");
+      return EVAL_EXIT_USAGE;
+    }
     dataset.questions = { ...extra, ...dataset.questions };
   }
 
-  const report = await runEval(
-    {
-      apiKey,
-      model: args.model,
-      baseUrl: args.baseUrl,
-      timeoutMs: args.timeoutMs,
-    },
-    dataset,
-    { concurrency: args.concurrency, sweep: !args.noSweep, sweepSteps: args.sweepSteps },
-  );
+  let report;
+  try {
+    report = await runEval(
+      {
+        apiKey,
+        model: args.model,
+        baseUrl: args.baseUrl,
+        timeoutMs: args.timeoutMs,
+      },
+      dataset,
+      { concurrency: args.concurrency, sweep: !args.noSweep, sweepSteps: args.sweepSteps },
+    );
+  } catch (err) {
+    sinks.err((err instanceof Error ? err.message : String(err)) + "\n");
+    return EVAL_EXIT_FAILED;
+  }
 
-  process.stdout.write(formatReport(report) + "\n");
+  sinks.out(formatReport(report) + "\n");
   if (args.out) writeFileSync(args.out, JSON.stringify(report, null, 2) + "\n");
-  if (report.failedCases > 0) console.error(`${report.failedCases}/${report.totalCases} case(s) failed — see the report`);
+  if (report.failedCases > 0) {
+    sinks.err(`${report.failedCases}/${report.totalCases} case(s) failed — see the report\n`);
+    return args.noFail ? EVAL_EXIT_OK : EVAL_EXIT_FAILED;
+  }
+  return EVAL_EXIT_OK;
 }
