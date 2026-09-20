@@ -42,5 +42,10 @@
   ],
   "dependencies": {
     "esbuild": "0.28.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Talya1412/jev-harness.git",
+    "directory": "packages/core"
   }
 }

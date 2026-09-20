@@ -1,0 +1,38 @@
+name: release
+
+# Version + publish via changesets. A "Version Packages" PR opens whenever
+# *.changeset/ files land on master; merging it publishes the changed
+# packages to npm with provenance. Requires the NPM_TOKEN secret and an
+# @jev-harness scope on npmjs.com.
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write # npm provenance
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci --include=dev
+      - uses: changesets/action@v1
+        with:
+          version: npm run changeset:version
+          publish: npm run release
+          title: Version Packages
+          commit: Version Packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

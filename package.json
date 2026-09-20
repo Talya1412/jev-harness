@@ -11,13 +11,18 @@
   "scripts": {
     "build": "npm run build --workspace=@jev-harness/core && npm run build --workspace=@jev-harness/kit && npm run build --workspace=@jev-harness/eval && npm run build --workspaces --if-present",
     "typecheck": "npm run build --workspace=@jev-harness/core && npm run build --workspace=@jev-harness/kit && npm run build --workspace=@jev-harness/eval && npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "playground": "npm run start --workspace=@jev-harness/playground"
+    "test": "npm test --workspaces --if-present",
+    "playground": "npm run start --workspace=@jev-harness/playground",
+    "changeset": "changeset",
+    "changeset:version": "changeset version && npm install --package-lock-only",
+    "release": "npm run build && npm publish --workspaces --access public --provenance"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
     "@types/node": "^22.10.2",
     "typescript": "^5.7.2",
     "vitest": "^5.0.1"
