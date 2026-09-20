@@ -1,6 +1,6 @@
 {
   "name": "@jev-harness/github",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "GitHub Action: a Jev-driven PR review that routes reviewers and flags destructive changes.",
   "type": "module",
   "license": "Apache-2.0",

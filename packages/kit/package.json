@@ -1,6 +1,6 @@
 {
   "name": "@jev-harness/kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared foundation for Jev (System One) harness adapters: env config, result envelope, core-pattern plumbing.",
   "type": "module",
   "license": "Apache-2.0",
