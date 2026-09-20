@@ -42,5 +42,10 @@
     "pull-request",
     "review",
     "routing"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Talya1412/jev-harness.git",
+    "directory": "packages/github"
+  }
 }

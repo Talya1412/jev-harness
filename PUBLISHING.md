@@ -1,10 +1,8 @@
 # Publishing the @jev-harness packages to npm
 
-The repo is an npm workspace monorepo. All packages share version `0.1.0`
-and depend on each other via `"*"` (resolved inside the workspace). Before
-publishing you must pin those inter-package ranges — npm refuses to publish
-a package whose dependency is `"*"` pointing at a workspace sibling without
-a real version.
+The repo is an npm workspace monorepo. The publishable packages share one
+version (changesets `fixed` group) and depend on each other via `"*"`
+(resolved inside the workspace, rewritten by `changeset version` on publish).
 
 ## Publishable vs private
 
@@ -12,79 +10,47 @@ a real version.
 |---|---|---|
 | `@jev-harness/core` | ✅ | no workspace deps |
 | `@jev-harness/kit` | ✅ | depends on core |
-| `@jev-harness/eval` | ✅ | depends on core; ships `jev-eval` bin |
+| `@jev-harness/eval` | ✅ | depends on core; ships `jev-eval` + `jev-tune` bins |
 | `@jev-harness/cli` | ✅ | depends on core, eval, kit; ships `jev` bin |
 | `@jev-harness/mcp` | ✅ | depends on core; ships MCP server bin |
 | `@jev-harness/omp` | ✅ | standalone bundle, no workspace deps |
 | `@jev-harness/pi` | ✅ | depends on core, kit |
 | `@jev-harness/claude-code` | ✅ | depends on core; bundle is committed |
+| `@jev-harness/github` | ✅ | depends on core; `dist/action.js` committed |
 | `@jev-harness/playground` | ❌ | `private: true` — run it locally or host it yourself |
 | `@jev-harness/pr-triage-action` | ❌ | `private: true` — consumed as a GitHub Action via `dist/index.js` |
+| `@jev-harness/jev-gate-action` | ❌ | `private: true` — same shape as pr-triage-action |
+| `@jev-harness/vscode` | ❌ | VS Code extension — package as a `.vsix`, not npm |
+| `jev-py` (Python) | ❌ npm | publish to PyPI separately (`python -m build`, `twine upload`) |
 
-## One-time setup
+## Release flow (changesets — the automated path)
 
-1. **npm account + token.** Create an access token at
-   <https://www.npmjs.com/settings/~/tokens> (a *Granular* token scoped to
-   publish for the `@jev-harness` org, or a classic *Automation* token).
-   The `@jev-harness` scope must exist on npm — create the org at
-   <https://www.npmjs.com/org/new> (free for public packages) or change the
-   package names first.
-2. **Export the token** in the shell you publish from:
-   ```sh
-   export NODE_AUTH_TOKEN=npm_xxxxxxxxxxxx
-   ```
-3. **Pin inter-package versions.** Replace every `"@jev-harness/*": "*"`
-   with the concrete range, e.g. `"^0.1.0"`:
-   ```sh
-   # quick check of what needs pinning
-   grep -n '"@jev-harness/[^"]*": "\*"' packages/*/package.json
-   ```
-   `packages/claude-code` already uses `"^0.1.0"`; the others need the swap.
-4. **Verify each package ships what you expect:**
-   ```sh
-   npm run build && npm run typecheck && npm test
-   for p in core kit eval cli mcp omp pi claude-code; do
-     echo "== $p =="; npm publish --dry-run -w @jev-harness/$p
-   done
-   ```
-   Check the " Tarball Details " block: package size, file count, and that
-   `dist/` + `README.md` + `LICENSE` are included and no test files leak in.
+1. **One-time setup**
+   - npm token with publish rights to the `@jev-harness` scope, stored as the
+     `NPM_TOKEN` repository secret.
+   - The `@jev-harness` scope must exist on npm — create the org at
+     <https://www.npmjs.com/org/new> (free for public packages) or rename
+     first.
+2. **Cut a release from any PR**: run `npm run changeset` locally, describe
+   the change, and commit the generated `.changeset/*.md` file.
+3. **Merge to master.** `.github/workflows/release.yml` (changesets/action)
+   opens/updates a *Version Packages* PR; merging it publishes all changed
+   packages with **npm provenance** (`id-token: write` +
+   `--provenance`, repository fields are already set).
 
-## Publishing
-
-From the repo root, in dependency order (core → kit → eval → cli, then the
-independents):
+## Manual fallback
 
 ```sh
-npm publish -w @jev-harness/core
-npm publish -w @jev-harness/kit
-npm publish -w @jev-harness/eval
-npm publish -w @jev-harness/cli
-npm publish -w @jev-harness/mcp
-npm publish -w @jev-harness/omp
-npm publish -w @jev-harness/pi
-npm publish -w @jev-harness/claude-code
+# pin inter-package ranges if publishing without changesets
+grep -n '"@jev-harness/[^"]*": "\*"' packages/*/package.json
+
+npm run build && npm run typecheck && npm test
+npm run release   # npm publish --workspaces --access public --provenance
 ```
 
-Notes:
-
-- First publish of each package must **not** use `--access` explicitly for
-  public orgs; if the org is private-default, add `--access public`.
-- The `prepack` scripts (where present) rebuild `dist/` automatically, so a
-  clean checkout publishes the same artifact CI verified.
-- The `bin` entries (`jev`, `jev-eval`, MCP server) are wired in each
-  package's `package.json`; npm links them on global install.
-
-## After the first release
-
-- Tag the commit: `git tag v0.1.0 && git push origin v0.1.0`.
-- For later releases use
-  [`changesets`](https://github.com/changesets/changesets) or bump all
-  `version` fields together, then re-pin the inter-package ranges before
-  publishing again.
-- Optional: add provenance by publishing from CI with
-  `id-token: write` + `npm publish --provenance` (works with the existing
-  GitHub Actions workflow once you add a release job).
+Check each package's " Tarball Details " in `npm publish --dry-run`:
+`dist/` + `README.md` + `LICENSE` in, test files out. The `prepack` scripts
+(where present) rebuild `dist/` automatically.
 
 ## GitHub Action (not npm)
 

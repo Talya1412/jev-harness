@@ -50,5 +50,10 @@
     "calibration",
     "metrics",
     "benchmark"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Talya1412/jev-harness.git",
+    "directory": "packages/eval"
+  }
 }

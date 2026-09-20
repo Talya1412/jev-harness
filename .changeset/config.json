@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
+  "changelog": ["@changesets/changelog-github", { "repo": "Talya1412/jev-harness" }],
+  "commit": false,
+  "fixed": [["@jev-harness/core", "@jev-harness/mcp", "@jev-harness/pi", "@jev-harness/omp", "@jev-harness/cli", "@jev-harness/eval", "@jev-harness/kit", "@jev-harness/github"]],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "master",
+  "updateInternalDependents": "always",
+  "ignore": ["@jev-harness/playground", "@jev-harness/pr-triage-action", "@jev-harness/jev-gate-action", "@jev-harness/vscode"]
+}
