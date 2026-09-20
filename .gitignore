@@ -38,3 +38,6 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# Internal publishing notes stay untracked.
+PUBLISHING.md
