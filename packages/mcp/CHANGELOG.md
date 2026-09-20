@@ -1,5 +1,12 @@
 # @jev-harness/mcp
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [[`b25554c`](https://github.com/Talya1412/jev-harness/commit/b25554cb7081763d510293f83053055fd7d55711)]:
+  - @jev-harness/core@0.2.1
+
 ## 0.2.0
 
 ### Patch Changes
