@@ -267,34 +267,235 @@ async function pickTool(config, input, options = {}) {
   return { tool: picked.choice ?? null, confidence: picked.confidence, risky, confirmRequired: risky >= riskThreshold, act };
 }
 
-// dist/extension.js
+// dist/config.js
 var DEFAULT_TIMEOUT_MS2 = 15e3;
 var GATE_THRESHOLD = 0.75;
 var SKILL_MIN_CONFIDENCE = 0.5;
-function readConfig(modelOverride) {
-  const apiKey = (process.env.TYPESAFE_API_KEY ?? "").trim();
+function readConfig(env, modelOverride) {
+  const apiKey = (env.TYPESAFE_API_KEY ?? "").trim();
   if (!apiKey) {
     throw new Error("TYPESAFE_API_KEY is not set. Export it in your shell or add it to your harness env file.");
   }
-  const timeoutRaw = (process.env.JEV_TIMEOUT_MS ?? "").trim();
+  const timeoutRaw = (env.JEV_TIMEOUT_MS ?? "").trim();
   const timeoutMs = timeoutRaw !== "" && Number.isFinite(Number(timeoutRaw)) ? Number(timeoutRaw) : DEFAULT_TIMEOUT_MS2;
   return {
     apiKey,
-    baseUrl: (process.env.TYPESAFE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ""),
-    model: (modelOverride ?? "").trim() || process.env.TYPESAFE_DEFAULT_MODEL || DEFAULT_MODEL,
+    baseUrl: (env.TYPESAFE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ""),
+    model: (modelOverride ?? "").trim() || env.TYPESAFE_DEFAULT_MODEL || DEFAULT_MODEL,
     timeoutMs
   };
 }
-function autoOn(env) {
-  return (process.env.OMP_JEV_AUTO ?? "").trim() === "1" && (process.env[env] ?? "1").trim() !== "0";
+function autoOn(env, name) {
+  return (env.OMP_JEV_AUTO ?? "").trim() === "1" && (env[name] ?? "1").trim() !== "0";
 }
-function envNum(name, fallback) {
-  const raw = (process.env[name] ?? "").trim();
+function envNum(env, name, fallback) {
+  const raw = (env[name] ?? "").trim();
   if (!raw)
     return fallback;
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
 }
+
+// dist/compact.js
+var COMPACT_DEFAULTS = {
+  keepThreshold: 0.2,
+  maxStateTokens: 25e3,
+  maxRequestTokens: 3e4,
+  truncateHeadChars: 300,
+  minReductionRatio: 0.25
+};
+function flatten(messages) {
+  const out = [];
+  for (const raw of messages) {
+    const m = raw;
+    const role = String(m.role ?? "unknown");
+    const blocks = Array.isArray(m.content) ? m.content : [];
+    const texts = [];
+    const toolUses = [];
+    const toolResults = [];
+    for (const b of blocks) {
+      if (!b || typeof b !== "object") {
+        if (typeof b === "string")
+          texts.push(b);
+        continue;
+      }
+      if (b.type === "text" && typeof b.text === "string")
+        texts.push(b.text);
+      else if (b.type === "tool_use" || b.type === "tool_call") {
+        toolUses.push({
+          id: String(b.id ?? b.toolCallId ?? ""),
+          tool: String(b.name ?? b.toolName ?? "tool"),
+          input: b.input ?? b.args ?? {}
+        });
+      } else if (b.type === "tool_result") {
+        const c = b.content;
+        let tr = "";
+        if (typeof c === "string")
+          tr = c;
+        else if (Array.isArray(c))
+          tr = c.map((x) => typeof x === "string" ? x : x?.text ?? "").join("\n");
+        else if (c != null)
+          tr = JSON.stringify(c);
+        toolResults.push({ id: String(b.tool_use_id ?? b.toolUseId ?? ""), text: tr });
+      }
+    }
+    out.push({ role, text: texts.join("\n"), toolUses, toolResults });
+  }
+  return out;
+}
+function collectCalls(msgs) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const m of msgs) {
+    for (const u of m.toolUses) {
+      if (u.id && !byId.has(u.id)) {
+        byId.set(u.id, { id: u.id, tool: u.tool, input: u.input, resultChars: 0, resultText: null });
+      }
+    }
+    for (const r of m.toolResults) {
+      const c = byId.get(r.id);
+      if (c) {
+        c.resultChars = r.text.length;
+        c.resultText = r.text;
+      }
+    }
+  }
+  return [...byId.values()];
+}
+function estimateTokens(s) {
+  let tok = 0;
+  for (const ch of s) {
+    if (/[A-Za-z]/.test(ch))
+      tok += 1 / 6;
+    else if (/[0-9]/.test(ch))
+      tok += 0.5;
+    else
+      tok += 1;
+  }
+  return Math.ceil(tok) + 8;
+}
+function buildCompactState(msgs) {
+  return {
+    conversation: msgs.map((m) => ({
+      role: m.role,
+      text: m.text.length > 4e3 ? m.text.slice(0, 3e3) + "\n...[truncated]...\n" + m.text.slice(-900) : m.text,
+      tool_calls: m.toolUses.map((u) => ({ id: u.id, tool: u.tool, input: u.input })),
+      tool_results: m.toolResults.map((r) => ({
+        id: r.id,
+        note: "ok, " + r.text.length + " chars (omitted)",
+        isError: /^\s*(error|Error|ERROR)/.test(r.text)
+      }))
+    }))
+  };
+}
+function questionsForCall(c) {
+  const q = {};
+  Object.assign(q, {
+    ["call_" + c.id]: {
+      type: "noul",
+      instructions: "Tool call " + c.id + " (" + c.tool + ") should stay in the history: knowing this call was made, with its input, still matters for what the assistant does next"
+    }
+  });
+  Object.assign(q, {
+    ["result_" + c.id]: {
+      type: "noul",
+      instructions: "The full output of tool call " + c.id + " (" + c.tool + ", " + c.resultChars + " chars) should stay in the history verbatim: the assistant still needs its contents and re-running the tool would not do"
+    }
+  });
+  return q;
+}
+function reduceCallQuestions(calls) {
+  const q = {};
+  for (const c of calls)
+    Object.assign(q, questionsForCall(c));
+  return q;
+}
+function batchCompactCalls(calls, stateTokens, budget) {
+  const perCall = estimateTokens(JSON.stringify(reduceCallQuestions(calls.slice(0, 1))));
+  const maxPerBatch = Math.max(1, Math.floor((budget - stateTokens - 20) / Math.max(1, perCall)));
+  const out = [];
+  for (let i = 0; i < calls.length; i += maxPerBatch)
+    out.push(calls.slice(i, i + maxPerBatch));
+  return out;
+}
+async function planCompaction(prep) {
+  const region = [...prep.region];
+  if (region.length === 0)
+    return { kind: "defer", reason: "no-messages" };
+  const flat = flatten(region);
+  const calls = collectCalls(flat);
+  if (calls.length === 0)
+    return { kind: "defer", reason: "no-calls" };
+  const state = buildCompactState(flat);
+  const stateTokens = estimateTokens(JSON.stringify(state));
+  if (stateTokens > prep.effective.maxStateTokens) {
+    return { kind: "defer", reason: "state-too-large", detail: { stateTokens, maxStateTokens: prep.effective.maxStateTokens } };
+  }
+  const batches = batchCompactCalls(calls, stateTokens, prep.effective.maxRequestTokens);
+  const answers = /* @__PURE__ */ new Map();
+  for (const batch of batches) {
+    const partial = await prep.ask(state, reduceCallQuestions(batch));
+    for (const [id, p] of Object.entries(partial))
+      answers.set(id, p);
+  }
+  const keepProb = (id) => answers.get(id) ?? 1;
+  const decisions = calls.map((c) => {
+    const keepCall = keepProb("call_" + c.id);
+    const keepResult = keepProb("result_" + c.id);
+    const action = keepResult >= prep.effective.keepThreshold ? "keep" : "drop_result";
+    return { call: c, action, keepCall, keepResult };
+  });
+  const dropped = decisions.filter((d) => d.action === "drop_result" && d.call.resultChars > prep.effective.truncateHeadChars);
+  const savedChars = dropped.reduce((n, d) => n + (d.call.resultChars - prep.effective.truncateHeadChars), 0);
+  const totalChars = calls.reduce((n, c) => n + c.resultChars, 0);
+  if (totalChars === 0 || savedChars / totalChars < prep.effective.minReductionRatio) {
+    return { kind: "defer", reason: "insufficient-reduction", detail: { savedChars, totalChars } };
+  }
+  const truncById = new Map(dropped.map((d) => [d.call.id, d.call]));
+  const render = (msgs) => msgs.map((m) => {
+    const parts = [];
+    if (m.text)
+      parts.push(m.text);
+    for (const u of m.toolUses) {
+      const t = truncById.get(u.id);
+      parts.push("[tool_use id=" + u.id + " name=" + u.tool + " input=" + JSON.stringify(u.input) + "]");
+      if (t && t.resultText != null) {
+        const full = t.resultText;
+        parts.push("[tool_result id=" + u.id + "] " + full.slice(0, prep.effective.truncateHeadChars) + "\n[..." + (t.resultChars - prep.effective.truncateHeadChars) + " chars omitted by jev_compact; re-run the tool to recover]");
+      }
+    }
+    for (const r of m.toolResults) {
+      if (m.toolUses.some((w) => w.id === r.id))
+        continue;
+      const t = truncById.get(r.id);
+      if (t && t.resultText != null) {
+        const full = t.resultText;
+        parts.push("[tool_result id=" + r.id + "] " + full.slice(0, prep.effective.truncateHeadChars) + "\n[..." + (t.resultChars - prep.effective.truncateHeadChars) + " chars omitted by jev_compact]");
+      } else {
+        parts.push("[tool_result id=" + r.id + "] " + r.text);
+      }
+    }
+    return parts.filter(Boolean).join("\n");
+  }).filter(Boolean).join("\n\n");
+  const summary = "Verbatim history retained; " + dropped.length + " tool output(s) truncated by Jev decisions.\n\n" + render(flat);
+  return { kind: "compacted", plan: { decisions, dropped, savedChars, totalChars, summary } };
+}
+function jevAsker(cfg) {
+  return async (state, questions) => {
+    const response = await askJev(cfg, state, questions);
+    const out = {};
+    for (const id of Object.keys(response.answers)) {
+      try {
+        out[id] = noul(response, id);
+      } catch {
+        out[id] = 1;
+      }
+    }
+    return out;
+  };
+}
+
+// dist/extension.js
+var ENV = process.env;
 function jevExtension(pi) {
   const z = pi.zod;
   const questionSchema = z.object({
@@ -314,7 +515,7 @@ function jevExtension(pi) {
     loadMode: "essential",
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig(params.model);
+      const cfg = readConfig(ENV, params.model);
       const result = await askJev(cfg, params.state, params.questions, signal ?? void 0);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -330,7 +531,7 @@ function jevExtension(pi) {
     loadMode: "essential",
     approval: "read",
     async execute(_id, _params, _signal) {
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const models = await listJevModels(cfg);
       const text = JSON.stringify(models, null, 2);
       return { content: [{ type: "text", text }], details: { models } };
@@ -347,7 +548,7 @@ function jevExtension(pi) {
     }),
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const result = await routeSkill(cfg, params.task, params.skills.map((name) => ({ name })), { signal: signal ?? void 0 });
       const hint = result.skill !== null ? "Consider loading skill: " + result.skill : "No listed skill is relevant.";
       return {
@@ -375,7 +576,7 @@ function jevExtension(pi) {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const result = await chooseBrowserAction(cfg, {
         goal: params.goal,
         page: params.page,
@@ -408,7 +609,7 @@ function jevExtension(pi) {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id, params, signal) {
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const result = await pickTool(cfg, { task: params.task, tools: params.tools, context: params.context }, { signal: signal ?? void 0 });
       const out = {
         tool: result.tool,
@@ -424,13 +625,13 @@ function jevExtension(pi) {
     }
   });
   pi.on("tool_call", async (event) => {
-    if (!autoOn("OMP_JEV_GATE"))
+    if (!autoOn(ENV, "OMP_JEV_GATE"))
       return;
     try {
       const name = String(event?.toolName ?? "");
       if (!/^(bash|write|edit|delete|move|rm|mcp__)/i.test(name))
         return;
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const verdict = await judgeDestructive(cfg, { tool: name, input: event?.input ?? {}, cwd: process.cwd() }, { threshold: GATE_THRESHOLD });
       if (verdict.blocked) {
         return {
@@ -447,7 +648,7 @@ function jevExtension(pi) {
     }
   });
   pi.on("input", async (event, ctx) => {
-    if (!autoOn("OMP_JEV_SKILL_ROUTER"))
+    if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER"))
       return;
     try {
       const text = String(event?.text ?? event?.prompt ?? "");
@@ -481,7 +682,7 @@ function jevExtension(pi) {
       for (const s of roster) {
         byName.set(s.name, s.description.replace(/\s+/g, " ").slice(0, 180));
       }
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const result = await routeSkill(cfg, text, shortlist.map((name) => ({ name, description: byName.get(name) ?? "" })), { minConfidence: SKILL_MIN_CONFIDENCE, maxCandidates: 12 });
       if (result.skill !== null) {
         return { additionalContext: "[jev] Consider loading skill: " + result.skill };
@@ -494,221 +695,53 @@ function jevExtension(pi) {
       return;
     }
   });
-  const COMPACT_DEFAULTS = {
-    keepThreshold: 0.2,
-    // measured: real scores sit 0.2-0.4, so 0.5 keeps nearly everything
-    maxStateTokens: 25e3,
-    maxRequestTokens: 3e4,
-    truncateHeadChars: 300,
-    minReductionRatio: 0.25
-  };
-  function flatten(messages) {
-    const out = [];
-    for (const raw of messages) {
-      const m = raw;
-      const role = String(m.role ?? "unknown");
-      const blocks = Array.isArray(m.content) ? m.content : [];
-      const texts = [];
-      const toolUses = [];
-      const toolResults = [];
-      for (const b of blocks) {
-        if (!b || typeof b !== "object") {
-          if (typeof b === "string")
-            texts.push(b);
-          continue;
-        }
-        if (b.type === "text" && typeof b.text === "string")
-          texts.push(b.text);
-        else if (b.type === "tool_use" || b.type === "tool_call") {
-          toolUses.push({
-            id: String(b.id ?? b.toolCallId ?? ""),
-            tool: String(b.name ?? b.toolName ?? "tool"),
-            input: b.input ?? b.args ?? {}
-          });
-        } else if (b.type === "tool_result") {
-          const c = b.content;
-          let tr = "";
-          if (typeof c === "string")
-            tr = c;
-          else if (Array.isArray(c))
-            tr = c.map((x) => typeof x === "string" ? x : x?.text ?? "").join("\n");
-          else if (c != null)
-            tr = JSON.stringify(c);
-          toolResults.push({ id: String(b.tool_use_id ?? b.toolUseId ?? ""), text: tr });
-        }
-      }
-      out.push({ role, text: texts.join("\n"), toolUses, toolResults });
-    }
-    return out;
-  }
-  function collectCalls(msgs) {
-    const byId = /* @__PURE__ */ new Map();
-    for (const m of msgs) {
-      for (const u of m.toolUses) {
-        if (u.id && !byId.has(u.id)) {
-          byId.set(u.id, { id: u.id, tool: u.tool, input: u.input, resultChars: 0, resultText: null });
-        }
-      }
-      for (const r of m.toolResults) {
-        const c = byId.get(r.id);
-        if (c) {
-          c.resultChars = r.text.length;
-          c.resultText = r.text;
-        }
-      }
-    }
-    return [...byId.values()];
-  }
-  function estimateTokens(s) {
-    let tok = 0;
-    for (const ch of s) {
-      if (/[A-Za-z]/.test(ch))
-        tok += 1 / 6;
-      else if (/[0-9]/.test(ch))
-        tok += 0.5;
-      else
-        tok += 1;
-    }
-    return Math.ceil(tok) + 8;
-  }
-  function buildCompactState(msgs, calls) {
-    const callById = new Map(calls.map((c) => [c.id, c]));
-    void callById;
-    return {
-      conversation: msgs.map((m) => ({
-        role: m.role,
-        text: m.text.length > 4e3 ? m.text.slice(0, 3e3) + "\n...[truncated]...\n" + m.text.slice(-900) : m.text,
-        tool_calls: m.toolUses.map((u) => ({ id: u.id, tool: u.tool, input: u.input })),
-        tool_results: m.toolResults.map((r) => ({
-          id: r.id,
-          note: "ok, " + r.text.length + " chars (omitted)",
-          isError: /^\s*(error|Error|ERROR)/.test(r.text)
-        }))
-      }))
-    };
-  }
-  function questionsForCall(c) {
-    const q = {};
-    Object.assign(q, {
-      ["call_" + c.id]: {
-        type: "noul",
-        instructions: "Tool call " + c.id + " (" + c.tool + ") should stay in the history: knowing this call was made, with its input, still matters for what the assistant does next"
-      }
-    });
-    Object.assign(q, {
-      ["result_" + c.id]: {
-        type: "noul",
-        instructions: "The full output of tool call " + c.id + " (" + c.tool + ", " + c.resultChars + " chars) should stay in the history verbatim: the assistant still needs its contents and re-running the tool would not do"
-      }
-    });
-    return q;
-  }
-  function reduceCallQuestions(calls) {
-    const q = {};
-    for (const c of calls)
-      Object.assign(q, questionsForCall(c));
-    return q;
-  }
-  function batchCompactCalls(calls, stateTokens, budget) {
-    const perCall = estimateTokens(JSON.stringify(reduceCallQuestions(calls.slice(0, 1))));
-    const maxPerBatch = Math.max(1, Math.floor((budget - stateTokens - 20) / Math.max(1, perCall)));
-    const out = [];
-    for (let i = 0; i < calls.length; i += maxPerBatch)
-      out.push(calls.slice(i, i + maxPerBatch));
-    return out;
-  }
   pi.on("session_before_compact", async (event) => {
-    if (!autoOn("OMP_JEV_CONTEXT"))
+    if (!autoOn(ENV, "OMP_JEV_CONTEXT"))
       return;
     try {
       const prep = event?.preparation;
       if (!prep || !Array.isArray(prep.messagesToSummarize))
         return;
-      const region = [...prep.messagesToSummarize ?? [], ...prep.turnPrefixMessages ?? []];
-      if (region.length === 0)
-        return;
-      const flat = flatten(region);
-      const calls = collectCalls(flat);
-      if (calls.length === 0)
-        return;
-      const cfg = readConfig();
-      const keepThreshold = envNum("OMP_JEV_KEEP_THRESHOLD", COMPACT_DEFAULTS.keepThreshold);
-      const maxStateTokens = envNum("OMP_JEV_MAX_STATE_TOKENS", COMPACT_DEFAULTS.maxStateTokens);
-      const maxRequestTokens = envNum("OMP_JEV_MAX_REQUEST_TOKENS", COMPACT_DEFAULTS.maxRequestTokens);
-      const truncateHead = envNum("OMP_JEV_TRUNCATE_HEAD", COMPACT_DEFAULTS.truncateHeadChars);
-      const minReduction = envNum("OMP_JEV_MIN_REDUCTION", COMPACT_DEFAULTS.minReductionRatio);
-      const state = buildCompactState(flat, calls);
-      const stateTokens = estimateTokens(JSON.stringify(state));
-      if (stateTokens > maxStateTokens) {
-        pi.logger.warn("jev_compact: state too large, deferring to native compaction", { stateTokens, maxStateTokens });
-        return;
-      }
-      const batches = batchCompactCalls(calls, stateTokens, maxRequestTokens);
-      const results = await Promise.all(batches.map((b) => askJev(cfg, state, reduceCallQuestions(b))));
-      const probs = /* @__PURE__ */ new Map();
-      for (const r of results) {
-        for (const id of Object.keys(r.answers)) {
-          try {
-            probs.set(id, noul(r, id));
-          } catch {
-            probs.set(id, 1);
-          }
-        }
-      }
-      const keepProb = (id) => probs.get(id) ?? 1;
-      const decisions = calls.map((c) => {
-        const keepCall = keepProb("call_" + c.id);
-        const keepResult = keepProb("result_" + c.id);
-        const action = keepResult >= keepThreshold ? "keep" : "drop_result";
-        return { call: c, action, keepCall, keepResult };
+      const effective = {
+        keepThreshold: envNum(ENV, "OMP_JEV_KEEP_THRESHOLD", COMPACT_DEFAULTS.keepThreshold),
+        maxStateTokens: envNum(ENV, "OMP_JEV_MAX_STATE_TOKENS", COMPACT_DEFAULTS.maxStateTokens),
+        maxRequestTokens: envNum(ENV, "OMP_JEV_MAX_REQUEST_TOKENS", COMPACT_DEFAULTS.maxRequestTokens),
+        truncateHeadChars: envNum(ENV, "OMP_JEV_TRUNCATE_HEAD", COMPACT_DEFAULTS.truncateHeadChars),
+        minReductionRatio: envNum(ENV, "OMP_JEV_MIN_REDUCTION", COMPACT_DEFAULTS.minReductionRatio)
+      };
+      const cfg = readConfig(ENV);
+      const outcome = await planCompaction({
+        region: [...prep.messagesToSummarize ?? [], ...prep.turnPrefixMessages ?? []],
+        ask: jevAsker(cfg),
+        effective
       });
-      const dropped = decisions.filter((d) => d.action === "drop_result" && d.call.resultChars > truncateHead);
-      const savedChars = dropped.reduce((n, d) => n + (d.call.resultChars - truncateHead), 0);
-      const totalChars = calls.reduce((n, c) => n + c.resultChars, 0);
-      if (totalChars === 0 || savedChars / totalChars < minReduction) {
-        pi.logger.debug("jev_compact: insufficient reduction, deferring", { savedChars, totalChars });
+      if (outcome.kind === "defer") {
+        pi.logger.debug("jev_compact: deferring to native compaction", {
+          reason: outcome.reason,
+          ...outcome.detail ?? {}
+        });
         return;
       }
-      const truncById = new Map(dropped.map((d) => [d.call.id, d.call]));
-      const render = (msgs) => msgs.map((m) => {
-        const parts = [];
-        if (m.text)
-          parts.push(m.text);
-        for (const u of m.toolUses) {
-          const t = truncById.get(u.id);
-          parts.push("[tool_use id=" + u.id + " name=" + u.tool + " input=" + JSON.stringify(u.input) + "]");
-          if (t && t.resultText != null) {
-            const full = t.resultText;
-            parts.push("[tool_result id=" + u.id + "] " + full.slice(0, truncateHead) + "\n[..." + (t.resultChars - truncateHead) + " chars omitted by jev_compact; re-run the tool to recover]");
-          }
-        }
-        for (const r of m.toolResults) {
-          if (m.toolUses.some((w) => w.id === r.id))
-            continue;
-          const t = truncById.get(r.id);
-          if (t && t.resultText != null) {
-            const full = t.resultText;
-            parts.push("[tool_result id=" + r.id + "] " + full.slice(0, truncateHead) + "\n[..." + (t.resultChars - truncateHead) + " chars omitted by jev_compact]");
-          } else {
-            parts.push("[tool_result id=" + r.id + "] " + r.text);
-          }
-        }
-        return parts.filter(Boolean).join("\n");
-      }).filter(Boolean).join("\n\n");
-      const summary = "Verbatim history retained; " + dropped.length + " tool output(s) truncated by Jev decisions.\n\n" + render(flat);
+      const { plan } = outcome;
       pi.logger.debug("jev_compact: reduced", {
-        calls: calls.length,
-        dropped: dropped.length,
-        batches: batches.length,
-        savedChars
+        calls: plan.decisions.length,
+        dropped: plan.dropped.length,
+        savedChars: plan.savedChars
       });
       return {
         compaction: {
-          summary,
-          shortSummary: "Jev verbatim compaction: " + dropped.length + "/" + calls.length + " tool outputs truncated",
+          summary: plan.summary,
+          shortSummary: "Jev verbatim compaction: " + plan.dropped.length + "/" + plan.decisions.length + " tool outputs truncated",
           firstKeptEntryId: prep.firstKeptEntryId,
           tokensBefore: prep.tokensBefore,
-          details: { jev: { calls: calls.length, dropped: dropped.length, savedChars, keepThreshold } }
+          details: {
+            jev: {
+              calls: plan.decisions.length,
+              dropped: plan.dropped.length,
+              savedChars: plan.savedChars,
+              keepThreshold: effective.keepThreshold
+            }
+          }
         }
       };
     } catch (err) {

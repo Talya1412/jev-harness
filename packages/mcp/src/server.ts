@@ -69,7 +69,8 @@ function asRecord(v: unknown, what: string): Record<string, unknown> {
   return v as Record<string, unknown>;
 }
 
-const TOOLS: Tool[] = [
+/** Exported so the tool contract can be asserted without starting a server. */
+export const TOOLS: Tool[] = [
   {
     name: "jev_ask",
     description:
@@ -130,7 +131,7 @@ const TOOLS: Tool[] = [
   {
     name: "jev_pick_tool",
     description:
-      "Select the single best tool for a task and flag whether it needs confirmation. Returns {tool, confidence, risky, confirmRequired, act}.",
+      "Select the single best tool for a task and flag whether it needs confirmation. Returns {tool, confidence, risky, confirmRequired, act}. Does not execute the tool: validate the choice and its confirmation flag before acting.",
     inputSchema: {
       type: "object",
       properties: {

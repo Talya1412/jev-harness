@@ -22,57 +22,20 @@
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
-  DEFAULT_BASE_URL,
-  DEFAULT_MODEL,
   askJev,
   chooseBrowserAction,
   judgeDestructive,
   listJevModels,
-  noul,
   pickTool,
   routeSkill,
-  type JevConfig,
   type Questions,
 } from "@jev-harness/core";
+import { GATE_THRESHOLD, SKILL_MIN_CONFIDENCE, autoOn, envNum, readConfig } from "./config.js";
+import { COMPACT_DEFAULTS, jevAsker, planCompaction, type CompactDefaults } from "./compact.js";
+import { MIN_PROMPT_CHARS, candidatePayload, shortlistSkills, type SkillCandidate } from "./skills.js";
 
-const DEFAULT_TIMEOUT_MS = 15_000;
-const GATE_THRESHOLD = 0.75;
-const SKILL_MIN_CONFIDENCE = 0.5;
-
-function readConfig(modelOverride?: string): JevConfig {
-  const apiKey = (process.env.TYPESAFE_API_KEY ?? "").trim();
-  if (!apiKey) {
-    throw new Error(
-      "TYPESAFE_API_KEY is not set. Export it in your shell or add it to your harness env file."
-    );
-  }
-  const timeoutRaw = (process.env.JEV_TIMEOUT_MS ?? "").trim();
-  const timeoutMs =
-    timeoutRaw !== "" && Number.isFinite(Number(timeoutRaw))
-      ? Number(timeoutRaw)
-      : DEFAULT_TIMEOUT_MS;
-  return {
-    apiKey,
-        baseUrl: (process.env.TYPESAFE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ""),
-    model: (modelOverride ?? "").trim() || process.env.TYPESAFE_DEFAULT_MODEL || DEFAULT_MODEL,
-    timeoutMs,
-  };
-}
-
-/** Master switch plus a per-hook off-switch ('<name>=0' disables one hook). */
-function autoOn(env: string): boolean {
-  return (
-    (process.env.OMP_JEV_AUTO ?? "").trim() === "1" &&
-    (process.env[env] ?? "1").trim() !== "0"
-  );
-}
-
-function envNum(name: string, fallback: number): number {
-  const raw = (process.env[name] ?? "").trim();
-  if (!raw) return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : fallback;
-}
+/** `process.env` bound once, so the pure helpers stay testable. */
+const ENV = process.env;
 
 export default function jevExtension(pi: ExtensionAPI): void {
   const z = pi.zod;
@@ -107,7 +70,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     loadMode: "essential",
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig(params.model);
+      const cfg = readConfig(ENV, params.model);
       const result = await askJev(cfg, params.state, params.questions as unknown as Questions, signal ?? undefined);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -124,7 +87,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     loadMode: "essential",
     approval: "read",
     async execute(_id: string, _params: any, _signal?: AbortSignal) {
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const models = await listJevModels(cfg);
       const text = JSON.stringify(models, null, 2);
       return { content: [{ type: "text", text }], details: { models } };
@@ -145,7 +108,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     }),
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const result = await routeSkill(
         cfg,
         params.task,
@@ -185,7 +148,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const result = await chooseBrowserAction(
         cfg,
         {
@@ -225,7 +188,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     loadMode: "discoverable",
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const result = await pickTool(
         cfg,
         { task: params.task, tools: params.tools, context: params.context },
@@ -253,12 +216,12 @@ export default function jevExtension(pi: ExtensionAPI): void {
   // Gate 1 — tool_call: block a tool call Jev judges dangerous before it runs.
   // Fail-open on any error: a Jev outage must never freeze the agent.
   pi.on("tool_call", async (event: any) => {
-    if (!autoOn("OMP_JEV_GATE")) return;
+    if (!autoOn(ENV, "OMP_JEV_GATE")) return;
     try {
       const name = String(event?.toolName ?? "");
       // Only adjudicate tools that can mutate the world; cheap reads skip the call.
       if (!/^(bash|write|edit|delete|move|rm|mcp__)/i.test(name)) return;
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const verdict = await judgeDestructive(
         cfg,
         { tool: name, input: event?.input ?? {}, cwd: process.cwd() },
@@ -289,7 +252,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
   // Append-only: returns additionalContext and never rewrites the system prefix,
   // so the provider prompt-cache prefix stays intact between turns.
   (pi.on as (name: string, handler: (event: any, ctx: any) => unknown) => void)("input", async (event: any, ctx: any) => {
-    if (!autoOn("OMP_JEV_SKILL_ROUTER")) return;
+    if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER")) return;
     try {
       const text = String(event?.text ?? event?.prompt ?? "");
       if (text.length < 12) return;
@@ -325,7 +288,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
       for (const s of roster) {
         byName.set(s.name, s.description.replace(/\s+/g, " ").slice(0, 180));
       }
-      const cfg = readConfig();
+      const cfg = readConfig(ENV);
       const result = await routeSkill(
         cfg,
         text,
@@ -354,264 +317,59 @@ export default function jevExtension(pi: ExtensionAPI): void {
   // hook the per-request `context` event (that invalidates the provider prompt
   // cache every turn).
   //
-  // Fail-open: any Jev error, missing key, or unfittable history returns
-  // undefined so OMP runs its normal compaction instead.
-  const COMPACT_DEFAULTS = {
-    keepThreshold: 0.2, // measured: real scores sit 0.2-0.4, so 0.5 keeps nearly everything
-    maxStateTokens: 25000,
-    maxRequestTokens: 30000,
-    truncateHeadChars: 300,
-    minReductionRatio: 0.25,
-  };
-
-  // OMP message -> the flat shape the scorer reasons over.
-  type FlatMsg = {
-    role: string;
-    text: string;
-    toolUses: Array<{ id: string; tool: string; input: unknown }>;
-    toolResults: Array<{ id: string; text: string }>;
-  };
-
-  function flatten(messages: readonly unknown[]): FlatMsg[] {
-    const out: FlatMsg[] = [];
-    for (const raw of messages) {
-      const m = raw as Record<string, unknown>;
-      const role = String(m.role ?? "unknown");
-      const blocks = Array.isArray(m.content) ? (m.content as any[]) : [];
-      const texts: string[] = [];
-      const toolUses: FlatMsg["toolUses"] = [];
-      const toolResults: FlatMsg["toolResults"] = [];
-      for (const b of blocks) {
-        if (!b || typeof b !== "object") {
-          if (typeof b === "string") texts.push(b);
-          continue;
-        }
-        if (b.type === "text" && typeof b.text === "string") texts.push(b.text);
-        else if (b.type === "tool_use" || b.type === "tool_call") {
-          toolUses.push({
-            id: String(b.id ?? b.toolCallId ?? ""),
-            tool: String(b.name ?? b.toolName ?? "tool"),
-            input: b.input ?? b.args ?? {},
-          });
-        } else if (b.type === "tool_result") {
-          const c = b.content;
-          let tr = "";
-          if (typeof c === "string") tr = c;
-          else if (Array.isArray(c)) tr = c.map((x: any) => (typeof x === "string" ? x : x?.text ?? "")).join("\n");
-          else if (c != null) tr = JSON.stringify(c);
-          toolResults.push({ id: String(b.tool_use_id ?? b.toolUseId ?? ""), text: tr });
-        }
-      }
-      out.push({ role, text: texts.join("\n"), toolUses, toolResults });
-    }
-    return out;
-  }
-
-  // Pair each tool_use with its result; a call with no result is still scored
-  // (the record of having tried matters), a result with no call is not.
-  interface CompactCall {
-    id: string;
-    tool: string;
-    input: unknown;
-    resultChars: number;
-    resultText: string | null;
-  }
-
-  function collectCalls(msgs: readonly FlatMsg[]): CompactCall[] {
-    const byId = new Map<string, CompactCall>();
-    for (const m of msgs) {
-      for (const u of m.toolUses) {
-        if (u.id && !byId.has(u.id)) {
-          byId.set(u.id, { id: u.id, tool: u.tool, input: u.input, resultChars: 0, resultText: null });
-        }
-      }
-      for (const r of m.toolResults) {
-        const c = byId.get(r.id);
-        if (c) {
-          c.resultChars = r.text.length;
-          c.resultText = r.text;
-        }
-      }
-    }
-    return [...byId.values()];
-  }
-
-  function estimateTokens(s: string): number {
-    // Calibrated heuristic: a word per six letters, half a token per digit,
-    // ~one per other symbol. Lands slightly above Jev's own reported count.
-    let tok = 0;
-    for (const ch of s) {
-      if (/[A-Za-z]/.test(ch)) tok += 1 / 6;
-      else if (/[0-9]/.test(ch)) tok += 0.5;
-      else tok += 1;
-    }
-    return Math.ceil(tok) + 8;
-  }
-
-  // Render the compact state: full conversation, results replaced by size notes.
-  function buildCompactState(msgs: readonly FlatMsg[], calls: readonly CompactCall[]): unknown {
-    const callById = new Map(calls.map((c) => [c.id, c]));
-    void callById;
-    return {
-      conversation: msgs.map((m) => ({
-        role: m.role,
-        text: m.text.length > 4000 ? m.text.slice(0, 3000) + "\n...[truncated]...\n" + m.text.slice(-900) : m.text,
-        tool_calls: m.toolUses.map((u) => ({ id: u.id, tool: u.tool, input: u.input })),
-        tool_results: m.toolResults.map((r) => ({
-          id: r.id,
-          note: "ok, " + r.text.length + " chars (omitted)",
-          isError: /^\s*(error|Error|ERROR)/.test(r.text),
-        })),
-      })),
-    };
-  }
-
-  function questionsForCall(c: CompactCall): Questions {
-    const q: Questions = {};
-    Object.assign(q, {
-      ["call_" + c.id]: {
-        type: "noul",
-        instructions:
-          "Tool call " + c.id + " (" + c.tool + ") should stay in the history: knowing this call was made, with its input, still matters for what the assistant does next",
-      },
-    });
-    Object.assign(q, {
-      ["result_" + c.id]: {
-        type: "noul",
-        instructions:
-          "The full output of tool call " + c.id + " (" + c.tool + ", " + c.resultChars + " chars) should stay in the history verbatim: the assistant still needs its contents and re-running the tool would not do",
-      },
-    });
-    return q;
-  }
-
-  function reduceCallQuestions(calls: readonly CompactCall[]): Questions {
-    const q: Questions = {};
-    for (const c of calls) Object.assign(q, questionsForCall(c));
-    return q;
-  }
-
-  function batchCompactCalls(calls: readonly CompactCall[], stateTokens: number, budget: number): CompactCall[][] {
-    const perCall = estimateTokens(JSON.stringify(reduceCallQuestions(calls.slice(0, 1))));
-    const maxPerBatch = Math.max(1, Math.floor((budget - stateTokens - 20) / Math.max(1, perCall)));
-    const out: CompactCall[][] = [];
-    for (let i = 0; i < calls.length; i += maxPerBatch) out.push(calls.slice(i, i + maxPerBatch));
-    return out;
-  }
-
+  // Fail-open: any Jev error, missing key, unfittable history, or saving too
+  // small to matter returns undefined so OMP runs its normal compaction.
   pi.on("session_before_compact", async (event: any) => {
-    if (!autoOn("OMP_JEV_CONTEXT")) return;
+    if (!autoOn(ENV, "OMP_JEV_CONTEXT")) return;
     try {
       const prep = event?.preparation;
       if (!prep || !Array.isArray(prep.messagesToSummarize)) return;
-      const region = [...(prep.messagesToSummarize ?? []), ...(prep.turnPrefixMessages ?? [])];
-      if (region.length === 0) return;
 
-      const flat = flatten(region);
-      const calls = collectCalls(flat);
-      if (calls.length === 0) return; // nothing scoreable -> let OMP compact normally
+      const effective: CompactDefaults = {
+        keepThreshold: envNum(ENV, "OMP_JEV_KEEP_THRESHOLD", COMPACT_DEFAULTS.keepThreshold),
+        maxStateTokens: envNum(ENV, "OMP_JEV_MAX_STATE_TOKENS", COMPACT_DEFAULTS.maxStateTokens),
+        maxRequestTokens: envNum(ENV, "OMP_JEV_MAX_REQUEST_TOKENS", COMPACT_DEFAULTS.maxRequestTokens),
+        truncateHeadChars: envNum(ENV, "OMP_JEV_TRUNCATE_HEAD", COMPACT_DEFAULTS.truncateHeadChars),
+        minReductionRatio: envNum(ENV, "OMP_JEV_MIN_REDUCTION", COMPACT_DEFAULTS.minReductionRatio),
+      };
 
-      const cfg = readConfig();
-      const keepThreshold = envNum("OMP_JEV_KEEP_THRESHOLD", COMPACT_DEFAULTS.keepThreshold);
-      const maxStateTokens = envNum("OMP_JEV_MAX_STATE_TOKENS", COMPACT_DEFAULTS.maxStateTokens);
-      const maxRequestTokens = envNum("OMP_JEV_MAX_REQUEST_TOKENS", COMPACT_DEFAULTS.maxRequestTokens);
-      const truncateHead = envNum("OMP_JEV_TRUNCATE_HEAD", COMPACT_DEFAULTS.truncateHeadChars);
-      const minReduction = envNum("OMP_JEV_MIN_REDUCTION", COMPACT_DEFAULTS.minReductionRatio);
-
-      const state = buildCompactState(flat, calls);
-      const stateTokens = estimateTokens(JSON.stringify(state));
-      if (stateTokens > maxStateTokens) {
-        pi.logger.warn("jev_compact: state too large, deferring to native compaction", { stateTokens, maxStateTokens });
-        return;
-      }
-
-      const batches = batchCompactCalls(calls, stateTokens, maxRequestTokens);
-      // Fan out: independent questions over the same state run in parallel.
-      const results = await Promise.all(batches.map((b) => askJev(cfg, state, reduceCallQuestions(b))));
-
-      // Merge per-batch answers; an unparseable answer keeps its content (fail-open).
-      const probs = new Map<string, number>();
-      for (const r of results) {
-        for (const id of Object.keys(r.answers)) {
-          try {
-            probs.set(id, noul(r, id));
-          } catch {
-            probs.set(id, 1);
-          }
-        }
-      }
-      const keepProb = (id: string): number => probs.get(id) ?? 1;
-
-      const decisions = calls.map((c) => {
-        const keepCall = keepProb("call_" + c.id);
-        const keepResult = keepProb("result_" + c.id);
-        // allowDroppingCalls defaults false: a low score loses the output, never the record.
-        const action = keepResult >= keepThreshold ? ("keep" as const) : ("drop_result" as const);
-        return { call: c, action, keepCall, keepResult };
+      const cfg = readConfig(ENV);
+      const outcome = await planCompaction({
+        region: [...(prep.messagesToSummarize ?? []), ...(prep.turnPrefixMessages ?? [])],
+        ask: jevAsker(cfg),
+        effective,
       });
 
-      const dropped = decisions.filter((d) => d.action === "drop_result" && d.call.resultChars > truncateHead);
-      const savedChars = dropped.reduce((n, d) => n + (d.call.resultChars - truncateHead), 0);
-      const totalChars = calls.reduce((n, c) => n + c.resultChars, 0);
-      if (totalChars === 0 || savedChars / totalChars < minReduction) {
-        pi.logger.debug("jev_compact: insufficient reduction, deferring", { savedChars, totalChars });
+      if (outcome.kind === "defer") {
+        pi.logger.debug("jev_compact: deferring to native compaction", {
+          reason: outcome.reason,
+          ...(outcome.detail ?? {}),
+        });
         return;
       }
 
-      // Build the verbatim summary: kept text stays byte-identical; dropped
-      // results become head + a recoverable note.
-      const truncById = new Map(dropped.map((d) => [d.call.id, d.call] as const));
-      const render = (msgs: readonly FlatMsg[]): string =>
-        msgs
-          .map((m) => {
-            const parts: string[] = [];
-            if (m.text) parts.push(m.text);
-            for (const u of m.toolUses) {
-              const t = truncById.get(u.id);
-              parts.push("[tool_use id=" + u.id + " name=" + u.tool + " input=" + JSON.stringify(u.input) + "]");
-              if (t && t.resultText != null) {
-                const full: string = t.resultText;
-                parts.push(
-                  "[tool_result id=" + u.id + "] " + full.slice(0, truncateHead) +
-                  "\n[..." + (t.resultChars - truncateHead) + " chars omitted by jev_compact; re-run the tool to recover]"
-                );
-              }
-            }
-            for (const r of m.toolResults) {
-              if (m.toolUses.some((w) => w.id === r.id)) continue;
-              const t = truncById.get(r.id);
-              if (t && t.resultText != null) {
-                const full: string = t.resultText;
-                parts.push(
-                  "[tool_result id=" + r.id + "] " + full.slice(0, truncateHead) +
-                  "\n[..." + (t.resultChars - truncateHead) + " chars omitted by jev_compact]"
-                );
-              } else {
-                parts.push("[tool_result id=" + r.id + "] " + r.text);
-              }
-            }
-            return parts.filter(Boolean).join("\n");
-          })
-          .filter(Boolean)
-          .join("\n\n");
-
-      const summary =
-        "Verbatim history retained; " + dropped.length + " tool output(s) truncated by Jev decisions.\n\n" + render(flat);
-
+      const { plan } = outcome;
       pi.logger.debug("jev_compact: reduced", {
-        calls: calls.length,
-        dropped: dropped.length,
-        batches: batches.length,
-        savedChars,
+        calls: plan.decisions.length,
+        dropped: plan.dropped.length,
+        savedChars: plan.savedChars,
       });
 
       return {
         compaction: {
-          summary,
-          shortSummary: "Jev verbatim compaction: " + dropped.length + "/" + calls.length + " tool outputs truncated",
+          summary: plan.summary,
+          shortSummary:
+            "Jev verbatim compaction: " + plan.dropped.length + "/" + plan.decisions.length + " tool outputs truncated",
           firstKeptEntryId: prep.firstKeptEntryId,
           tokensBefore: prep.tokensBefore,
-          details: { jev: { calls: calls.length, dropped: dropped.length, savedChars, keepThreshold } },
+          details: {
+            jev: {
+              calls: plan.decisions.length,
+              dropped: plan.dropped.length,
+              savedChars: plan.savedChars,
+              keepThreshold: effective.keepThreshold,
+            },
+          },
         },
       };
     } catch (err) {
