@@ -1,6 +1,6 @@
 {
   "name": "@jev-harness/omp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "OMP-native adapter: Jev (System One) tools and opt-in auto-hooks for Oh My Pi.",
   "type": "module",
   "license": "Apache-2.0",
