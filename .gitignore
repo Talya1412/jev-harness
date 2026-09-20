@@ -8,6 +8,10 @@ packages/core/dist/
 packages/mcp/dist/
 packages/omp/dist/
 packages/pi/dist/
+packages/cli/dist/
+
+# Command Code session data
+.commandcode/
 
 *.tsbuildinfo
 coverage/
