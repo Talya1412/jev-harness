@@ -573,6 +573,7 @@ function jevExtension(pi) {
   }
   function buildCompactState(msgs, calls) {
     const callById = new Map(calls.map((c) => [c.id, c]));
+    void callById;
     return {
       conversation: msgs.map((m) => ({
         role: m.role,
