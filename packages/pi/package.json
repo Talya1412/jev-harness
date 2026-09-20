@@ -1,6 +1,6 @@
 {
   "name": "@jev-harness/pi",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Pi extension packaging TypeSafe Jev (System One) judgments: tools, skill routing, and verbatim compaction.",
   "keywords": [
     "jev",
