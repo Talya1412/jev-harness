@@ -50,6 +50,21 @@ score(res, "risk").score;           // 2.02
 | `chooseBrowserAction(config, input, opts?)` | One browser action from a numbered element table. Advisory. |
 | `pickTool(config, input, opts?)` | One tool from a candidate set, with a confirmation flag. |
 | `rankCandidates(config, task, candidates, opts?)` | Score a list best-first. |
+| `gateInjection(config, { source, content }, opts?)` | Prompt-injection gate for untrusted content before it reaches the model. Default threshold 0.7. |
+| `verifyStep(config, { task, report, evidence? }, opts?)` | Did the work satisfy the task? Cheap post-hoc critic. Default threshold 0.6. |
+| `needsClarification(config, { message, recent? }, opts?)` | Detect a genuine ambiguity fork worth one clarifying question. Default threshold 0.5. |
+| `isDuplicate(config, item, existing, opts?)` | Semantic dedup; one batched request, one `noul` per candidate. Default threshold 0.5. |
+| `routeEffort(config, { task, context? }, opts?)` | Cheap-vs-expensive model routing for a task. Default threshold 0.5. |
+
+### Caching, coalescing, failure policy
+
+| Export | Purpose |
+|---|---|
+| `createJevCache({ ttlMs?, maxEntries? })` | Bounded TTL cache for Jev responses. |
+| `createCachedClient(config, opts?)` | `ask()` with transparent response caching. |
+| `createCoalescer(config, { windowMs? })` | Merges concurrent same-state `ask` calls into one request. |
+| `stableStringify(value)` / `fnv1a(text)` | Deterministic JSON and hashing for custom keys. |
+| `withFailMode(mode, fn, { open, closed, onError? })` | Explicit fail-open / fail-closed / throw policy per call site. |
 
 ### Config
 

@@ -8,7 +8,14 @@ packages/core/dist/
 packages/mcp/dist/
 packages/omp/dist/
 packages/pi/dist/
+packages/eval/dist/
 packages/cli/dist/
+packages/kit/dist/
+
+# The GitHub Action ships only its bundled entrypoint (the runner executes
+# dist/index.js directly); the tsc intermediates are local build noise.
+packages/pr-triage-action/dist/*
+!packages/pr-triage-action/dist/index.js
 
 # Command Code session data
 .commandcode/
