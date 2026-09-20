@@ -1,0 +1,29 @@
+{
+  "name": "@jev-harness/playground",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local playground for TypeSafe Jev (System One): paste state + questions, see calibrated probabilities live.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "dev": "node src/server.mjs",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@jev-harness/core": "*"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.1"
+  },
+  "keywords": [
+    "jev",
+    "typesafe",
+    "system-one",
+    "playground",
+    "developer-tools"
+  ]
+}

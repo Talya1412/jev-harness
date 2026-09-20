@@ -1,14 +1,15 @@
 {
   "name": "@jev-harness/cli",
   "version": "0.1.0",
-  "description": "Post-run gate check: one Jev judgment over a git diff, file, or stdin, for CI and subagent gates.",
+  "description": "Unified `jev` CLI for TypeSafe Jev (System One): ask, models, eval, plus the `jev-gate` post-run gate check for CI and subagents.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "jev-gate": "./dist/index.js"
+    "jev": "./dist/bin.js",
+    "jev-gate": "./dist/gate-bin.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -25,11 +26,14 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@jev-harness/core": "*"
+    "@jev-harness/core": "*",
+    "@jev-harness/eval": "*",
+    "@jev-harness/kit": "*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
@@ -42,6 +46,7 @@
     "system-one",
     "cli",
     "gate",
-    "ci"
+    "ci",
+    "developer-tools"
   ]
 }

@@ -9,9 +9,10 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=@jev-harness/core && npm run build --workspaces --if-present",
-    "typecheck": "npm run build --workspace=@jev-harness/core && npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "build": "npm run build --workspace=@jev-harness/core && npm run build --workspace=@jev-harness/kit && npm run build --workspace=@jev-harness/eval && npm run build --workspaces --if-present",
+    "typecheck": "npm run build --workspace=@jev-harness/core && npm run build --workspace=@jev-harness/kit && npm run build --workspace=@jev-harness/eval && npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "playground": "npm run start --workspace=@jev-harness/playground"
   },
   "engines": {
     "node": ">=20"

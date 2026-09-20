@@ -35,7 +35,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@jev-harness/core": "*"
+    "@jev-harness/core": "*",
+    "@jev-harness/kit": "*"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.85.1",

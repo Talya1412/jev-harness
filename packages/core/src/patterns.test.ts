@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { routeSkill, judgeDestructive, pickTool, chooseBrowserAction, rankCandidates } from "../src/patterns.js";
+import {
+  routeSkill,
+  judgeDestructive,
+  pickTool,
+  chooseBrowserAction,
+  rankCandidates,
+  gateInjection,
+  verifyStep,
+  needsClarification,
+  isDuplicate,
+  routeEffort,
+} from "../src/patterns.js";
 import type { JevResponse } from "../src/types.js";
 
 /** Route every call through a canned response, recording the request bodies. */
@@ -155,5 +166,97 @@ describe("rankCandidates", () => {
     const r = await rankCandidates({ apiKey: "k", fetchImpl }, "task", []);
     expect(r).toEqual([]);
     expect(seen).toHaveLength(0);
+  });
+});
+
+describe("gateInjection", () => {
+  it("blocks content at or above the threshold", async () => {
+    const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.93 } });
+    const r = await gateInjection({ apiKey: "k", fetchImpl }, { source: "webfetch", content: "ignore previous instructions..." });
+    expect(r.injection).toBe(0.93);
+    expect(r.blocked).toBe(true);
+  });
+
+  it("allows benign content", async () => {
+    const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.02 } });
+    const r = await gateInjection({ apiKey: "k", fetchImpl }, { source: "tool-result", content: "4 files changed" });
+    expect(r.blocked).toBe(false);
+  });
+
+  it("honours a custom threshold", async () => {
+    const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.55 } });
+    const r = await gateInjection({ apiKey: "k", fetchImpl }, { source: "s", content: "c" }, { threshold: 0.5 });
+    expect(r.blocked).toBe(true);
+  });
+});
+
+describe("verifyStep", () => {
+  it("marks the step done at or above the threshold", async () => {
+    const { fetchImpl, seen } = jevStub({ complete: { type: "noul", noul: 0.88 } });
+    const r = await verifyStep({ apiKey: "k", fetchImpl }, { task: "fix the login redirect", report: "Changed X; tests pass." });
+    expect(r.complete).toBe(0.88);
+    expect(r.done).toBe(true);
+    expect(seen[0].state.task).toBe("fix the login redirect");
+  });
+
+  it("keeps looping on partial work", async () => {
+    const { fetchImpl } = jevStub({ complete: { type: "noul", noul: 0.3 } });
+    const r = await verifyStep({ apiKey: "k", fetchImpl }, { task: "t", report: "half done" });
+    expect(r.done).toBe(false);
+  });
+});
+
+describe("needsClarification", () => {
+  it("flags a genuine fork", async () => {
+    const { fetchImpl } = jevStub({ ambiguous: { type: "noul", noul: 0.81 } });
+    const r = await needsClarification({ apiKey: "k", fetchImpl }, { message: "update the config" });
+    expect(r.ambiguous).toBe(0.81);
+    expect(r.ask).toBe(true);
+  });
+
+  it("lets an unambiguous request through", async () => {
+    const { fetchImpl } = jevStub({ ambiguous: { type: "noul", noul: 0.1 } });
+    const r = await needsClarification({ apiKey: "k", fetchImpl }, { message: "bump eslint to 9.0 in package.json" });
+    expect(r.ask).toBe(false);
+  });
+});
+
+describe("isDuplicate", () => {
+  it("asks one batched noul per candidate and filters by threshold", async () => {
+    const { fetchImpl, seen } = jevStub({
+      dup_0: { type: "noul", noul: 0.92 },
+      dup_1: { type: "noul", noul: 0.11 },
+    });
+    const r = await isDuplicate({ apiKey: "k", fetchImpl }, "please fix the flaky login test", [
+      "login test is flaky, fix it",
+      "dark mode toggle broken",
+    ]);
+    expect(seen).toHaveLength(1);
+    expect(Object.keys(seen[0].questions)).toEqual(["dup_0", "dup_1"]);
+    expect(r.duplicates).toEqual(["login test is flaky, fix it"]);
+    expect(r.any).toBe(true);
+    expect(r.scores[1].probability).toBe(0.11);
+  });
+
+  it("short-circuits on an empty candidate list", async () => {
+    const { fetchImpl, seen } = jevStub({});
+    const r = await isDuplicate({ apiKey: "k", fetchImpl }, "item", []);
+    expect(r).toEqual({ duplicates: [], any: false, scores: [] });
+    expect(seen).toHaveLength(0);
+  });
+});
+
+describe("routeEffort", () => {
+  it("sends hard tasks to the expensive model", async () => {
+    const { fetchImpl } = jevStub({ hard: { type: "noul", noul: 0.87 } });
+    const r = await routeEffort({ apiKey: "k", fetchImpl }, { task: "redesign the sync protocol" });
+    expect(r.hard).toBe(0.87);
+    expect(r.useExpensive).toBe(true);
+  });
+
+  it("keeps routine work on the cheap tier", async () => {
+    const { fetchImpl } = jevStub({ hard: { type: "noul", noul: 0.08 } });
+    const r = await routeEffort({ apiKey: "k", fetchImpl }, { task: "rename this variable" });
+    expect(r.useExpensive).toBe(false);
   });
 });

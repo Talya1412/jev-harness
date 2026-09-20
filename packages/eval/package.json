@@ -1,14 +1,14 @@
 {
-  "name": "@jev-harness/mcp",
+  "name": "@jev-harness/eval",
   "version": "0.1.0",
-  "description": "MCP server (stdio) exposing TypeSafe's Jev (System One) decision model as tools.",
+  "description": "Evaluation and calibration toolkit for TypeSafe's Jev (System One) decision model.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "jev-harness-mcp": "./dist/index.js"
+    "jev-eval": "./dist/bin.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,6 +16,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
     }
   },
   "files": [
@@ -27,21 +31,23 @@
     "build": "tsc -p tsconfig.json",
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@jev-harness/core": "*",
-    "@modelcontextprotocol/sdk": "^1.30.0"
+    "@jev-harness/core": "*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^5.0.1"
   },
   "keywords": [
     "jev",
     "typesafe",
-    "mcp",
-    "model-context-protocol",
-    "system-one"
+    "system-one",
+    "evaluation",
+    "calibration",
+    "metrics",
+    "benchmark"
   ]
 }
