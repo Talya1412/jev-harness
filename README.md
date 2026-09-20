@@ -13,7 +13,11 @@ Jev is not a chat model. You send it a `state` plus typed `questions` and it ret
 | [`@jev-harness/mcp`](packages/mcp) | Any MCP client | MCP over stdio | 7 tools |
 | [`@jev-harness/claude-code`](packages/claude-code) | Claude Code | Plugin | PreToolUse gate + prompt skill routing |
 | [`@jev-harness/pi`](packages/pi) | Pi | Extension | 5 tools + 2 hooks |
-| [`@jev-harness/cli`](packages/cli) | CI / subagent workflows | CLI | `jev-gate` semantic acceptance gate |
+| [`@jev-harness/eval`](packages/eval) | — | `jev-eval` CLI + library | Labeled-dataset evaluation: accuracy, calibration, threshold sweeps |
+| [`@jev-harness/pr-triage-action`](packages/pr-triage-action) | GitHub Actions | Action | PR triage: auth impact, risk score, review routing |
+| [`@jev-harness/kit`](packages/kit) | — | — | Shared adapter foundation: env config, result envelope, core-pattern plumbing |
+| [`@jev-harness/playground`](packages/playground) | — | `npm run playground` | Local web playground: state + questions → live probabilities |
+| [`@jev-harness/cli`](packages/cli) | CI / subagent workflows | `jev` + `jev-gate` CLIs | `jev ask/models/eval` terminal access + `jev-gate` semantic acceptance gate |
 
 ## Why Jev
 
@@ -64,6 +68,51 @@ choice(res, "route").choice; // "security"
 - **`chooseBrowserAction`** — pick one browser action from a numbered element table. Advisory only; the caller validates the index against the live snapshot.
 - **`pickTool`** — choose one tool from a candidate set and flag confirmation-worthy side effects.
 - **`rankCandidates`** — score a list of strings against a task, best-first.
+- **`gateInjection`** — gate untrusted tool results and fetched pages for prompt injection *before* they reach the model. Threshold 0.7.
+- **`verifyStep`** — did the finished work actually satisfy the task? Jev as a cheap critic; loop only when `done` is false.
+- **`needsClarification`** — detect a genuine fork (two materially different readings) so the agent asks before burning tokens on a wrong guess.
+- **`isDuplicate`** — semantic dedup of memory entries and tool results in one batched call.
+- **`routeEffort`** — decide whether a task deserves the expensive model or the cheap fast tier.
+
+## Caching, coalescing, failure policy
+
+Hooks fire per tool call, so core ships the cost controls that keep them cheap:
+
+- **`createCachedClient`** — TTL cache keyed on (model, state, questions). Repeated identical judgments — the destructive gate seeing the same call twice — stop costing requests.
+- **`createCoalescer`** — merges concurrent `ask` calls that share the same state into ONE batched request; Jev evaluates the merged questions independently, so answers are identical to separate calls.
+- **`withFailMode`** — make the safety policy explicit at each call site: `"open"` (allow on error), `"closed"` (deny on error), or `"throw"`.
+
+## Writing a new adapter
+
+[`@jev-harness/kit`](packages/kit) is the shared adapter foundation — the OMP and Pi adapters are both built on it. It owns the host-independent parts: env credential resolution, the `{ content, details }` tool-result envelope, fail-open error rendering, core-pattern call plumbing, and the lexical skill prefilter. Bring your own host schemas (zod, typebox, …) and hook wiring; the kit does the rest.
+
+## Playground
+
+Tuning question wording is the main design activity — [`@jev-harness/playground`](packages/playground) makes it fast:
+
+```bash
+npm run playground   # → http://localhost:4173
+```
+
+Paste a state, pick a preset (destructive gate, PR triage, injection gate, skill routing), edit the questions, and watch the probabilities move. When a question looks right, validate it on labeled data with eval.
+
+The same workflow lives in the terminal via the **[`jev` CLI](packages/cli)**:
+
+```bash
+jev ask --questions '{"gate":{"type":"noul","instructions":"destructive?"}}'   # inline questions
+jev ask --state state.json --questions questions.json                          # files
+jev eval --dataset cases.jsonl --out report.json                               # calibration
+```
+
+`jev ask` prints the raw JSON response — probabilities per question, usage included — so question wording can be iterated without an adapter.
+
+## Evaluating thresholds
+
+Every threshold in this repo is a starting point, not ground truth. [`@jev-harness/eval`](packages/eval) runs a labeled dataset through your questions and reports accuracy, Brier, AUC, ECE, a reliability diagram, and a **max-F1 threshold sweep** per question:
+
+```bash
+TYPESAFE_API_KEY=... jev eval --dataset cases.jsonl --out report.json
+```
 
 ## Configuration
 
