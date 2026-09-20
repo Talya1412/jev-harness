@@ -13,6 +13,7 @@ Jev is not a chat model. You send it a `state` plus typed `questions` and it ret
 | [`@jev-harness/mcp`](packages/mcp) | Any MCP client | MCP over stdio | 7 tools |
 | [`@jev-harness/claude-code`](packages/claude-code) | Claude Code | Plugin | PreToolUse gate + prompt skill routing |
 | [`@jev-harness/pi`](packages/pi) | Pi | Extension | 5 tools + 2 hooks |
+| [`@jev-harness/cli`](packages/cli) | CI / subagent workflows | CLI | `jev-gate` semantic acceptance gate |
 
 ## Why Jev
 
