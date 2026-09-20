@@ -27,8 +27,11 @@ import {
   askJev,
   chooseBrowserAction,
   createBudgetGuard,
+  createDecisionLog,
   createPersistentCache,
+  decisionDigest,
   judgeDestructive,
+  jsonlSink,
   listJevModels,
   pickTool,
   routeSkill,
@@ -63,6 +66,11 @@ function jevConfig(modelOverride?: string, redact?: boolean): JevConfig {
   if (guard) cfg = guard.wrap(cfg);
   return withPersistentCache(cfg, persistentCache);
 }
+
+/** Gate decisions: in-memory ring always, JSONL when OMP_JEV_DECISION_LOG is set. */
+const gateLog = createDecisionLog(
+  (ENV.OMP_JEV_DECISION_LOG ?? "").trim() ? { sink: jsonlSink((ENV.OMP_JEV_DECISION_LOG ?? "").trim()) } : {},
+);
 
 export default function jevExtension(pi: ExtensionAPI): void {
   const z = pi.zod;
@@ -249,11 +257,22 @@ export default function jevExtension(pi: ExtensionAPI): void {
       // Only adjudicate tools that can mutate the world; cheap reads skip the call.
       if (!/^(bash|write|edit|delete|move|rm|mcp__)/i.test(name)) return;
       const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
+      const startedAt = Date.now();
       const verdict = await judgeDestructive(
         cfg,
         { tool: name, input: event?.input ?? {}, cwd: process.cwd() },
         { threshold: GATE_THRESHOLD }
       );
+      gateLog.record({
+        ts: new Date().toISOString(),
+        kind: "omp_gate",
+        model: cfg.model ?? "unknown",
+        digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, ["destructive"]),
+        answers: { destructive: verdict.destructive },
+        threshold: GATE_THRESHOLD,
+        action: verdict.blocked ? "block" : "allow",
+        latencyMs: Date.now() - startedAt,
+      });
       if (verdict.blocked) {
         return {
           block: true,
