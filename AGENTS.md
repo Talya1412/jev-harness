@@ -64,8 +64,7 @@ it never emits prose. See @README.md for primitives and patterns.
   gate). Shared compiler options live in `tsconfig.base.json`; each package
   tsconfig only sets `rootDir` / `outDir` / `include` / `exclude`.
 - On a machine with `NODE_ENV=production`, npm omits dev dependencies — use
-  `npm install --include=dev` / `npm ci --include=dev` there. `.npmrc` sets
-  `engine-strict=true`.
+  `npm install --include=dev` / `npm ci --include=dev` there.
 
 ## Architecture Notes
 
