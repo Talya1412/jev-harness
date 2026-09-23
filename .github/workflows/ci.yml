@@ -61,7 +61,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install pytest
+      # Install the package's dev extra so the declared pytest constraint is
+      # actually exercised, instead of a floating `pip install pytest`.
+      - run: python -m pip install -e "packages/jev-py[dev]"
       - name: jev-py test suite (includes TS parity fixtures)
         run: python -m pytest packages/jev-py/tests -q
 
