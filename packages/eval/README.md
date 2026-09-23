@@ -132,11 +132,18 @@ cases.
 
 The API sits behind Cloudflare, which answers some shell-injection-shaped
 payloads with a `403` challenge before Jev ever sees them. This has been
-observed with `${IFS}` word-splitting; quoting, command substitution, wrappers,
-globs, variable indirection, `eval`, base64/hex payloads and ANSI-C quoting all
-pass. Such a case cannot be measured through the public endpoint — probe the
-payload once before adding it, and keep the technique out of the set if the edge
-refuses it.
+observed with IFS word-splitting — expanding the `IFS` variable to rebuild the
+spaces inside a command; quoting, command substitution, wrappers, globs,
+variable indirection, `eval`, base64/hex payloads and ANSI-C quoting all pass.
+Such a case cannot be measured through the public endpoint — probe the payload
+once before adding it, and keep the technique out of the set if the edge refuses
+it.
+
+Keep literal payloads out of **shipped** files too. The same class of filter
+sits in front of the npm registry, so a literal payload quoted in a packaged
+README blocks `npm publish` with a bare `403` while every other package in the
+same release publishes fine — describe the technique instead of quoting the
+bytes.
 
 ## Programmatic use
 
