@@ -308,3 +308,115 @@ export function pearsonCorr(xs: number[], ys: number[]): number | null {
   if (sxx === 0 || syy === 0) return null;
   return sxy / Math.sqrt(sxx * syy);
 }
+
+// ---------------------------------------------------------------------------
+// Small-sample uncertainty and paired comparison.
+//
+// Benchmarks here are small (tens to low hundreds of cases), so a point
+// estimate hides whether two runs actually differ. Report a Wilson score
+// interval for proportions — it keeps its coverage near 0/1 and with small n,
+// where the Wald interval does not — and compare two systems on the SAME cases
+// with McNemar's exact test, which only looks at the cases where they disagree.
+// ---------------------------------------------------------------------------
+
+export interface Interval {
+  lo: number;
+  hi: number;
+}
+
+/** Wilson score interval for a binomial proportion (default 95%). */
+export function wilsonInterval(successes: number, n: number, z = 1.96): Interval {
+  if (!(n > 0)) return { lo: 0, hi: 1 };
+  const phat = successes / n;
+  const denom = 1 + (z * z) / n;
+  const center = (phat + (z * z) / (2 * n)) / denom;
+  const half = (z * Math.sqrt((phat * (1 - phat)) / n + (z * z) / (4 * n * n))) / denom;
+  return { lo: Math.max(0, center - half), hi: Math.min(1, center + half) };
+}
+
+export interface McNemarResult {
+  /** Cases only A got right. */
+  aOnly: number;
+  /** Cases only B got right. */
+  bOnly: number;
+  /** Exact two-sided p-value over the discordant pairs (null when none). */
+  p: number | null;
+}
+
+/** Sum of binomial pmf terms C(n,i)/2^n for i in [0, kMax] — overflow-safe. */
+function binomTail(n: number, kMax: number): number {
+  let sum = 0;
+  let term = Math.pow(0.5, n);
+  sum += term;
+  for (let i = 1; i <= kMax; i++) {
+    term = (term * (n - i + 1)) / i;
+    sum += term;
+  }
+  return sum;
+}
+
+/** Exact McNemar test over paired correctness outcomes. */
+export function mcnemarTest(pairs: Array<{ a: boolean; b: boolean }>): McNemarResult {
+  let aOnly = 0;
+  let bOnly = 0;
+  for (const { a, b } of pairs) {
+    if (a && !b) aOnly++;
+    else if (!a && b) bOnly++;
+  }
+  const n = aOnly + bOnly;
+  if (n === 0) return { aOnly, bOnly, p: null };
+  const p = Math.min(1, 2 * binomTail(n, Math.min(aOnly, bOnly)));
+  return { aOnly, bOnly, p };
+}
+
+export interface PairDelta {
+  pair: string;
+  ids: string[];
+  /** Absolute difference between the probabilities of the two members. */
+  delta: number;
+}
+
+export interface InvarianceReport {
+  pairs: number;
+  /** Largest |Δp| across all pairs. */
+  maxDelta: number;
+  meanDelta: number;
+  /** Pairs whose |Δp| exceeds the tolerance. */
+  violations: PairDelta[];
+}
+
+/**
+ * Invariance check: cases sharing a `pair` id describe the same action in
+ * different words, so their probabilities should be close. Reports the deltas
+ * instead of asserting equality — the model is documented as *roughly* stable,
+ * not invariant — and CI gates a loose ceiling on it.
+ */
+export function invarianceDeltas(
+  cases: Array<{ id: string; pair?: string; p: number }>,
+  tolerance = 0.2,
+): InvarianceReport {
+  const groups = new Map<string, Array<{ id: string; p: number }>>();
+  for (const c of cases) {
+    if (!c.pair) continue;
+    groups.set(c.pair, [...(groups.get(c.pair) ?? []), { id: c.id, p: c.p }]);
+  }
+  const violations: PairDelta[] = [];
+  let maxDelta = 0;
+  let sum = 0;
+  let count = 0;
+  for (const [pair, members] of groups) {
+    if (members.length < 2) continue;
+    const ps = members.map((m) => m.p);
+    const delta = Math.max(...ps) - Math.min(...ps);
+    maxDelta = Math.max(maxDelta, delta);
+    sum += delta;
+    count++;
+    if (delta > tolerance) violations.push({ pair, ids: members.map((m) => m.id), delta });
+  }
+  return {
+    pairs: count,
+    maxDelta: count ? maxDelta : 0,
+    meanDelta: count ? sum / count : 0,
+    violations: violations.sort((a, b) => b.delta - a.delta),
+  };
+}

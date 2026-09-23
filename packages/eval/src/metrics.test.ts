@@ -2,11 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   binaryMetrics,
   ece,
+  invarianceDeltas,
+  mcnemarTest,
   reliabilityBins,
   thresholdSweep,
   choiceMetrics,
   scoreMetrics,
   pearsonCorr,
+  wilsonInterval,
 } from "../src/metrics.js";
 
 const clean = [
@@ -138,5 +141,89 @@ describe("pearsonCorr", () => {
 
   it("is 1 for a perfect line", () => {
     expect(pearsonCorr([1, 2, 3], [2, 4, 6])).toBeCloseTo(1, 10);
+  });
+});
+
+describe("wilsonInterval", () => {
+  it("stays inside [0, 1] and brackets the estimate", () => {
+    const ci = wilsonInterval(9, 10);
+    expect(ci.lo).toBeGreaterThan(0.5);
+    expect(ci.lo).toBeLessThan(0.9);
+    expect(ci.hi).toBeGreaterThan(0.9);
+    expect(ci.hi).toBeLessThanOrEqual(1);
+  });
+
+  it("is wide for a tiny sample", () => {
+    const ci = wilsonInterval(2, 2);
+    expect(ci.lo).toBeLessThan(0.5);
+    expect(ci.hi).toBe(1);
+  });
+
+  it("degenerates to [0, 1] with no observations", () => {
+    expect(wilsonInterval(0, 0)).toEqual({ lo: 0, hi: 1 });
+  });
+});
+
+describe("mcnemarTest", () => {
+  it("returns null p when the systems never disagree", () => {
+    const r = mcnemarTest([
+      { a: true, b: true },
+      { a: false, b: false },
+    ]);
+    expect(r.aOnly).toBe(0);
+    expect(r.bOnly).toBe(0);
+    expect(r.p).toBeNull();
+  });
+
+  it("is significant when one system wins every disagreement", () => {
+    // 8 discordant pairs, all won by A: two-sided exact p = 2 * 2^-8.
+    const pairs = Array.from({ length: 8 }, () => ({ a: true, b: false }));
+    const r = mcnemarTest(pairs);
+    expect(r.aOnly).toBe(8);
+    expect(r.p!).toBeCloseTo(0.0078125, 10);
+  });
+
+  it("is not significant on an even split", () => {
+    const pairs = [
+      { a: true, b: false },
+      { a: false, b: true },
+    ];
+    expect(mcnemarTest(pairs).p!).toBeCloseTo(1, 10);
+  });
+});
+
+describe("invarianceDeltas", () => {
+  it("groups by pair and reports the largest delta", () => {
+    const r = invarianceDeltas([
+      { id: "a1", pair: "p", p: 0.9 },
+      { id: "a2", pair: "p", p: 0.8 },
+      { id: "b1", pair: "q", p: 0.2 },
+      { id: "b2", pair: "q", p: 0.21 },
+    ]);
+    expect(r.pairs).toBe(2);
+    expect(r.maxDelta).toBeCloseTo(0.1, 10);
+    expect(r.violations).toHaveLength(0);
+  });
+
+  it("flags pairs beyond the tolerance", () => {
+    const r = invarianceDeltas(
+      [
+        { id: "a1", pair: "p", p: 0.95 },
+        { id: "a2", pair: "p", p: 0.4 },
+      ],
+      0.2,
+    );
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]!.pair).toBe("p");
+    expect(r.violations[0]!.delta).toBeCloseTo(0.55, 10);
+  });
+
+  it("ignores singleton pairs and unpaired cases", () => {
+    const r = invarianceDeltas([
+      { id: "a", pair: "solo", p: 0.9 },
+      { id: "b", p: 0.1 },
+    ]);
+    expect(r.pairs).toBe(0);
+    expect(r.maxDelta).toBe(0);
   });
 });

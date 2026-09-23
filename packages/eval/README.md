@@ -61,6 +61,14 @@ touches_auth (noul, 24 scored)
 
 A bare array of cases works too — pair it with `--questions questions.json`.
 
+Cases may also carry three optional benchmark fields:
+
+| Field   | Meaning                                                                                                                                              |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `slice` | Which benchmark slice the case belongs to (`"obfuscation"`, `"steering"`, `"false-positive-trap"`, …). The report breaks the metrics down per slice. |
+| `pair`  | Invariance group id. Cases sharing one describe the same action in different words; the report measures how far their probabilities diverge.         |
+| `note`  | Why the case is labeled the way it is — benchmark cases carry their rationale so the labels can be audited later.                                    |
+
 **Labels** are plain values, coerced per question type:
 
 | Type     | Accepts                                 |
@@ -83,6 +91,52 @@ The suggested threshold is a starting point from _your_ data — keep final
 thresholds and side effects in your code, and prefer a threshold that
 matches the cost asymmetry of your workflow (a destructive-gate veto and a
 skill hint should not share one).
+
+For `noul` questions the report also breaks the confusion matrix down **per
+slice**, with Wilson 95% intervals on recall and precision, and summarizes
+**paraphrase invariance** (`maxΔp` across `pair` groups). Slices exist because a
+healthy aggregate hides a broken slice: adversarial cases are a small share of a
+set, so losing all of them barely moves the total.
+
+## Benchmarking a decision
+
+A single labeled set answers "does this work?". It cannot answer "does it still
+work on inputs I did not tune against?", which is the question that matters once
+a threshold ships. Build the set in two splits and keep them apart:
+
+- **dev / tuning** — question wording and thresholds may be iterated against it.
+- **holdout** — never used to choose wording. It is the generalization number,
+  and it is the one worth quoting.
+
+The repo's own destructive gate is measured this way:
+[`destructive-gate.json`](golden/destructive-gate.json) (dev) and
+[`destructive-gate.holdout.json`](golden/destructive-gate.holdout.json)
+(holdout), covering clear cases, obfuscated commands (MITRE
+[T1027.010](https://attack.mitre.org/techniques/T1027/010/) techniques: quoting,
+command substitution, wrappers, globs, variable indirection, encoded payloads),
+injected-steering text that argues for its own classification, distractor
+context, false-positive traps, and paraphrase pairs.
+
+Two helpers keep the comparison honest when the sets are small:
+
+- **`wilsonInterval`** — confidence interval for a proportion, which keeps its
+  coverage near 0/1 where the normal approximation does not.
+- **`mcnemarTest`** — exact paired test between two versions on the same cases;
+  it only looks at where they disagree, so it answers "did this wording change
+  actually help?" instead of "are the totals different?".
+
+Neither is a substitute for more labeled data. Report the interval, then add
+cases.
+
+### A note for case authors
+
+The API sits behind Cloudflare, which answers some shell-injection-shaped
+payloads with a `403` challenge before Jev ever sees them. This has been
+observed with `${IFS}` word-splitting; quoting, command substitution, wrappers,
+globs, variable indirection, `eval`, base64/hex payloads and ANSI-C quoting all
+pass. Such a case cannot be measured through the public endpoint — probe the
+payload once before adding it, and keep the technique out of the set if the edge
+refuses it.
 
 ## Programmatic use
 

@@ -19,6 +19,20 @@ export interface EvalCase {
   id: string;
   state: unknown;
   label: Record<string, unknown>;
+  /**
+   * Benchmark slice this case belongs to (e.g. "obfuscation", "steering",
+   * "false-positive-trap"). Slice metrics show WHERE a regression landed; a
+   * flat aggregate can hide a broken slice behind a healthy one.
+   */
+  slice?: string;
+  /**
+   * Invariance group. Cases sharing a `pair` describe the same action in
+   * different words; their probabilities should be close (see
+   * `invarianceDeltas`).
+   */
+  pair?: string;
+  /** Why this case is labeled the way it is — the benchmark's audit trail. */
+  note?: string;
 }
 
 export interface EvalDataset {
@@ -37,6 +51,9 @@ function toCase(obj: Record<string, unknown>, index: number): EvalCase {
     id: typeof obj.id === "string" && obj.id ? obj.id : `case_${index}`,
     state: obj.state,
     label: obj.label as Record<string, unknown>,
+    ...(typeof obj.slice === "string" && obj.slice ? { slice: obj.slice } : {}),
+    ...(typeof obj.pair === "string" && obj.pair ? { pair: obj.pair } : {}),
+    ...(typeof obj.note === "string" && obj.note ? { note: obj.note } : {}),
   };
 }
 

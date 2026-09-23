@@ -10,13 +10,17 @@ import { labelToBinary, labelToScoreIndex, type EvalDataset } from "./dataset.js
 import {
   binaryMetrics,
   choiceMetrics,
+  invarianceDeltas,
   reliabilityBins,
   scoreMetrics,
   thresholdSweep,
+  wilsonInterval,
   type BinaryPair,
   type BinaryMetrics,
   type ChoiceMetrics,
   type ChoiceRow,
+  type Interval,
+  type InvarianceReport,
   type ReliabilityBin,
   type ScoreMetrics,
   type ScoreRow,
@@ -44,6 +48,26 @@ export interface EvalOptions {
   sweep?: boolean;
   /** Sweep resolution. Default 20 (thresholds 0, 0.05, …, 1). */
   sweepSteps?: number;
+  /**
+   * Operating threshold for the reported confusion matrix and slice metrics.
+   * Default 0.5 — the threshold the adapters ship with.
+   */
+  threshold?: number;
+  /** |Δp| above which an invariance pair counts as a violation. Default 0.2. */
+  invarianceTolerance?: number;
+}
+
+/** Metrics for one benchmark slice, at the operating threshold. */
+export interface SliceMetrics {
+  slice: string;
+  n: number;
+  /** Cases labeled positive (destructive/yes) in this slice. */
+  positives: number;
+  metrics: BinaryMetrics;
+  /** Wilson 95% CI on recall (tp / positives); null when the slice has none. */
+  recallCi: Interval | null;
+  /** Wilson 95% CI on precision (tp / predicted positives); null when none. */
+  precisionCi: Interval | null;
 }
 
 export interface QuestionMetrics {
@@ -53,7 +77,13 @@ export interface QuestionMetrics {
   scored: number;
   /** OK cases excluded because the label was missing or not coercible. */
   skipped: number;
+  /** Operating threshold used for `noul` confusion counts (default 0.5). */
+  threshold?: number;
   noul?: BinaryMetrics & { suggestedThreshold?: number };
+  /** Per-slice breakdown (noul only), sorted by slice name. */
+  slices?: SliceMetrics[];
+  /** Paraphrase-invariance deltas across `pair` groups (noul only). */
+  invariance?: InvarianceReport;
   reliability?: ReliabilityBin[];
   sweep?: { rows: SweepRow[]; best: SweepRow };
   choice?: ChoiceMetrics;
@@ -68,6 +98,21 @@ export interface EvalReport {
   usage: { requests: number; inputTokens: number; outputTokens: number; estimatedCostUsd: number };
   metrics: QuestionMetrics[];
   errors: Array<{ id: string; message: string }>;
+}
+
+/** Confusion metrics for one slice, with Wilson CIs on the two error modes. */
+function sliceMetrics(slice: string, pairs: BinaryPair[], threshold: number): SliceMetrics {
+  const m = binaryMetrics(pairs, threshold);
+  const positives = pairs.filter((p) => p.y === 1).length;
+  const predictedPositive = m.tp + m.fp;
+  return {
+    slice,
+    n: m.n,
+    positives,
+    metrics: m,
+    recallCi: positives > 0 ? wilsonInterval(m.tp, positives) : null,
+    precisionCi: predictedPositive > 0 ? wilsonInterval(m.tp, predictedPositive) : null,
+  };
 }
 
 export async function runEval(
@@ -137,21 +182,33 @@ export async function runEval(
     const base: QuestionMetrics = { questionId, type: question.type, scored: 0, skipped: 0 };
 
     if (question.type === "noul") {
+      const threshold = opts.threshold ?? 0.5;
       const pairs: BinaryPair[] = [];
+      const bySlice = new Map<string, BinaryPair[]>();
+      const invCases: Array<{ id: string; pair?: string; p: number }> = [];
       for (let i = 0; i < cases.length; i++) {
         const r = results[i]!;
         if (!r.ok || !r.response) continue;
+        const kase = cases[i]!;
         const p = r.response.answers[questionId];
-        const y = labelToBinary(cases[i]!.label[questionId]);
+        const y = labelToBinary(kase.label[questionId]);
         if (!p || p.type !== "noul" || y === null) {
           base.skipped++;
           continue;
         }
-        pairs.push({ p: p.noul, y });
+        const entry: BinaryPair = { p: p.noul, y };
+        pairs.push(entry);
+        const slice = kase.slice ?? "core";
+        bySlice.set(slice, [...(bySlice.get(slice) ?? []), entry]);
+        invCases.push({ id: kase.id, pair: kase.pair, p: p.noul });
       }
       base.scored = pairs.length;
-      const m = binaryMetrics(pairs);
-      base.noul = { ...m };
+      base.threshold = threshold;
+      base.noul = { ...binaryMetrics(pairs, threshold) };
+      base.slices = [...bySlice.entries()]
+        .map(([slice, sp]) => sliceMetrics(slice, sp, threshold))
+        .sort((a, b) => a.slice.localeCompare(b.slice));
+      base.invariance = invarianceDeltas(invCases, opts.invarianceTolerance ?? 0.2);
       if (pairs.length > 0) {
         base.reliability = reliabilityBins(pairs);
         if (opts.sweep !== false) {

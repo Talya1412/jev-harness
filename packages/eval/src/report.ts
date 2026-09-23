@@ -37,6 +37,27 @@ function questionLines(q: QuestionMetrics): string[] {
         );
       }
     }
+    if (q.slices && q.slices.length > 1) {
+      lines.push(`  slices (operating threshold ${(q.threshold ?? 0.5).toFixed(2)}):`);
+      for (const s of q.slices) {
+        const ci = s.recallCi
+          ? `  recallCI ${s.recallCi.lo.toFixed(2)}–${s.recallCi.hi.toFixed(2)}`
+          : "";
+        lines.push(
+          `    ${s.slice.padEnd(22)} n=${String(s.n).padStart(3)} pos=${String(s.positives).padStart(3)}` +
+            `  P=${pct(s.metrics.precision)} R=${pct(s.metrics.recall)} F1=${pct(s.metrics.f1)}` +
+            `  fp=${s.metrics.fp} fn=${s.metrics.fn}${ci}`,
+        );
+      }
+    }
+    if (q.invariance && q.invariance.pairs > 0) {
+      lines.push(
+        `  invariance: ${q.invariance.pairs} pair(s), maxΔp ${num(q.invariance.maxDelta)} meanΔp ${num(q.invariance.meanDelta)}` +
+          (q.invariance.violations.length > 0
+            ? `  violations: ${q.invariance.violations.length}`
+            : ""),
+      );
+    }
   }
   if (q.choice) {
     lines.push(

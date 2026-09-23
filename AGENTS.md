@@ -31,11 +31,18 @@ it never emits prose. See @README.md for primitives and patterns.
   semantic acceptance gate over a diff/file/stdin for CI and subagents.
 - @packages/eval — calibration toolkit (`jev-eval`, `jev-tune`): binary
   metrics, reliability bins, threshold sweeps, multiclass/score metrics,
-  tune (f1/youden). Golden baseline in @packages/eval/golden (LIVE
-  recording: AUC 1.000, Brier 0.013); regression.test.ts enforces it every
-  CI run; parity.test.ts pins TS metrics to the shared fixture that
-  jev-py also asserts. Scripts: scripts/record-baseline.mjs (live
-  recording), scripts/check-regression.mjs (report vs baseline).
+  Wilson CI, exact McNemar, paraphrase-invariance deltas, tune (f1/youden).
+  Benchmark for the destructive gate in @packages/eval/golden, TWO splits:
+  @packages/eval/golden/destructive-gate.json (dev/tuning, 69 cases) and
+  @packages/eval/golden/destructive-gate.holdout.json (holdout, 74 cases —
+  never used to choose wording). Cases carry `slice`/`pair`/`note`; the
+  report breaks metrics down per slice and reports invariance; holdout LIVE
+  recording: AUC 0.996, Brier 0.020. regression.test.ts recomputes both
+  baselines from their per-case rows and enforces per-slice floors;
+  parity.test.ts pins TS metrics to the shared fixture that jev-py also
+  asserts. Scripts: scripts/record-baseline.mjs (live recording; retries the
+  Cloudflare 403s that bursts provoke), scripts/check-regression.mjs (report
+  vs baseline, aggregate + slices).
 - @packages/github — `jev-review` GitHub Action (advisory PR comment).
 - @packages/jev-gate-action — `jev-gate` GitHub Action: destructive +
   secret-leak + risk on a PR diff; advisory unless fail_on_block. Bundled
