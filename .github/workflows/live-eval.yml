@@ -18,8 +18,8 @@ jobs:
   eval:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -35,7 +35,7 @@ jobs:
         run: node packages/eval/scripts/check-regression.mjs report.json packages/eval/golden/destructive-gate.baseline.json
       - name: Upload the fresh report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-report
           path: report.json
