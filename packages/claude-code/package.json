@@ -16,6 +16,15 @@
   "engines": {
     "node": ">=20"
   },
+  "keywords": [
+    "claude-code",
+    "plugin",
+    "typesafe",
+    "jev",
+    "system-one",
+    "gate",
+    "skill-routing"
+  ],
   "files": [
     "dist",
     ".claude-plugin",

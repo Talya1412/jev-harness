@@ -14,6 +14,14 @@
     "Machine Learning",
     "Linters"
   ],
+  "keywords": [
+    "vscode",
+    "vscode-extension",
+    "typesafe",
+    "jev",
+    "system-one",
+    "gate"
+  ],
   "main": "./extension.js",
   "activationEvents": [],
   "contributes": {
