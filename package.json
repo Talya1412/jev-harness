@@ -20,7 +20,7 @@
     "qa": "npm run build && npm run typecheck && npm run lint && npm run format:check && npm test",
     "playground": "npm run start --workspace=@jev-harness/playground",
     "changeset": "changeset",
-    "changeset:version": "changeset version && npm install --package-lock-only",
+    "changeset:version": "changeset version && node packages/claude-code/scripts/stamp-versions.mjs && npm install --package-lock-only",
     "release": "npm run build && changeset publish"
   },
   "engines": {
