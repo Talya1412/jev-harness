@@ -20,7 +20,7 @@ classifiers = [
 dependencies = []  # zero runtime deps: stdlib urllib + asyncio only
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=9.1.1"]
 
 [project.scripts]
 jev-tune = "jev_harness.eval.cli:main"
