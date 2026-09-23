@@ -72,6 +72,12 @@ it never emits prose. See @README.md for primitives and patterns.
   tsconfig only sets `rootDir` / `outDir` / `include` / `exclude`.
 - On a machine with `NODE_ENV=production`, npm omits dev dependencies — use
   `npm install --include=dev` / `npm ci --include=dev` there.
+- Never put a literal attack payload in a **shipped** file (a README that
+  `files` includes, `dist`, a bundle). The npm registry sits behind the same
+  shell-injection filter as the Jev API and answers the publish PUT with a bare
+  `403 Forbidden` while every other package in the same release publishes fine —
+  describe the technique instead of quoting the bytes. Cost two failed 0.4.0
+  release runs on 2026-09-23.
 
 ## Architecture Notes
 
