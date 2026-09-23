@@ -11,6 +11,10 @@ updates:
       # the newest release: newer majors typecheck APIs absent on Node 20/22/24.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # Dependabot cannot resolve TypeScript's peer constraint in this npm
+      # workspace ("Error while updating peer dependency"), which fails the
+      # whole npm update run; ignore it so the other dependencies still update.
+      - dependency-name: "typescript"
     groups:
       npm-minor-patch:
         patterns: ["*"]
