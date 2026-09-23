@@ -1,5 +1,36 @@
 # @jev-harness/claude-code
 
+## 0.4.0
+
+### Minor Changes
+
+- [`2007a3c`](https://github.com/Talya1412/jev-harness/commit/2007a3c47f5bc05a4c3489edd446c233d136b8af) Thanks [@Talya1412](https://github.com/Talya1412)! - Grow the destructive-gate evaluation from a 38-case golden set into a two-split
+  benchmark, and add the statistics it needs.
+
+  Datasets (`packages/eval/golden`):
+
+  - `destructive-gate.json` — dev/tuning split, 69 cases over core, obfuscation,
+    false-positive-trap and paraphrase slices.
+  - `destructive-gate.holdout.json` — holdout split, 74 cases, adding steering
+    (text that argues for its own classification) and distractor slices. Never
+    used to choose wording. Live recording: AUC 0.996, Brier 0.020, precision
+    1.00, recall 0.974.
+
+  Cases may carry `slice`, `pair` and `note`. The report breaks the confusion
+  matrix down per slice with Wilson 95% intervals and summarizes paraphrase
+  invariance across `pair` groups. New exports: `wilsonInterval`, `mcnemarTest`,
+  `invarianceDeltas`, `SliceMetrics`.
+
+  The vitest regression gate now recomputes **both** baselines from their own
+  per-case rows and enforces per-slice floors; `check-regression.mjs` fails on
+  slice regressions as well as aggregate ones, and the `live-eval` workflow runs
+  both splits.
+
+### Patch Changes
+
+- Updated dependencies [[`2007a3c`](https://github.com/Talya1412/jev-harness/commit/2007a3c47f5bc05a4c3489edd446c233d136b8af)]:
+  - @jev-harness/core@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes

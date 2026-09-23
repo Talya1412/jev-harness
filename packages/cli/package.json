@@ -1,6 +1,6 @@
 {
   "name": "@jev-harness/cli",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Unified `jev` CLI for TypeSafe Jev (System One): ask, models, eval, plus the `jev-gate` post-run gate check for CI and subagents.",
   "type": "module",
   "license": "Apache-2.0",
@@ -36,9 +36,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jev-harness/core": "^0.3.0",
-    "@jev-harness/eval": "^0.3.0",
-    "@jev-harness/kit": "^0.3.0"
+    "@jev-harness/core": "^0.4.0",
+    "@jev-harness/eval": "^0.4.0",
+    "@jev-harness/kit": "^0.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
