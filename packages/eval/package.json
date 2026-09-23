@@ -1,6 +1,6 @@
 {
   "name": "@jev-harness/eval",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Evaluation and calibration toolkit for TypeSafe's Jev (System One) decision model.",
   "type": "module",
   "license": "Apache-2.0",
@@ -41,7 +41,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jev-harness/core": "^0.4.0"
+    "@jev-harness/core": "^0.5.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
