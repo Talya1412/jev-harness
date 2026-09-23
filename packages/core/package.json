@@ -1,6 +1,6 @@
 {
   "name": "@jev-harness/core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Harness-agnostic client and patterns for TypeSafe's Jev (System One) decision model.",
   "type": "module",
   "license": "Apache-2.0",
