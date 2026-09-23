@@ -359,8 +359,8 @@ async function run() {
   const destructive = noul(response, "destructive");
   const secretLeakP = noul(response, "secret_leak");
   const risk = score(response, "risk").score;
-  const destructiveThreshold = numInput("destructive_threshold", 0.75);
-  const secretThreshold = numInput("secret_threshold", 0.6);
+  const destructiveThreshold = numInput("destructive_threshold", 0.12);
+  const secretThreshold = numInput("secret_threshold", 0.07);
   const verdict = destructive >= destructiveThreshold || secretLeakP >= secretThreshold ? "block" : "pass";
   setOutput("destructive", destructive.toFixed(3));
   setOutput("secret_leak", secretLeakP.toFixed(3));

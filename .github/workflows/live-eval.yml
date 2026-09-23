@@ -1,12 +1,14 @@
 name: live-eval
 
-# Manual calibration run against the real Jev API. Re-runs the benchmark
-# datasets and fails on quality regressions against the committed baselines —
-# both the aggregate and every gated slice. Requires the TYPESAFE_API_KEY secret.
+# Manual calibration run against the real Jev API. Re-runs each benchmark
+# dataset and fails on quality regressions against its committed baseline —
+# both the aggregate and every gated slice. Requires TYPESAFE_API_KEY.
 #
-# The two datasets are different things and are kept apart on purpose:
-#   destructive-gate          dev / tuning split (wording may be iterated on it)
-#   destructive-gate.holdout  holdout — never used to choose wording
+# Every entry pairs a dataset with ONE baseline, because a dataset can ask
+# several questions (merge-gate asks two) and each gets its own recording:
+#   destructive-gate           dev / tuning split (wording may be iterated here)
+#   destructive-gate.holdout   holdout — regression reference, never tuned against
+#   merge-gate                 the diffs jev-gate-action judges on a PR
 on:
   workflow_dispatch:
 
@@ -25,9 +27,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dataset:
-          - destructive-gate
-          - destructive-gate.holdout
+        include:
+          - dataset: destructive-gate
+            baseline: destructive-gate.baseline.json
+          - dataset: destructive-gate.holdout
+            baseline: destructive-gate.holdout.baseline.json
+          - dataset: merge-gate
+            baseline: merge-gate.destructive.baseline.json
+          - dataset: merge-gate
+            baseline: merge-gate.secret-leak.baseline.json
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -38,8 +46,8 @@ jobs:
       - run: npm run build --workspace=@jev-harness/core --if-present
       - run: npm run build --workspace=@jev-harness/eval --if-present
       # packages/eval/dist is gitignored: the two build steps above must run first.
-      # Low concurrency on purpose — the API sits behind Cloudflare, which
-      # answers a burst with a 403 challenge rather than a 429.
+      # Low concurrency on purpose — the API sits behind Cloudflare, which answers
+      # a burst with a 403 challenge rather than a 429.
       - name: Run the golden dataset against the live API
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
@@ -47,15 +55,15 @@ jobs:
           node packages/eval/dist/bin.js
           --dataset packages/eval/golden/${{ matrix.dataset }}.json
           --concurrency 3
-          --out report-${{ matrix.dataset }}.json
+          --out report-${{ matrix.baseline }}
       - name: Compare against the committed baseline (aggregate + slices)
         run: >
           node packages/eval/scripts/check-regression.mjs
-          report-${{ matrix.dataset }}.json
-          packages/eval/golden/${{ matrix.dataset }}.baseline.json
+          report-${{ matrix.baseline }}
+          packages/eval/golden/${{ matrix.baseline }}
       - name: Upload the fresh report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: eval-report-${{ matrix.dataset }}
-          path: report-${{ matrix.dataset }}.json
+          name: eval-report-${{ matrix.baseline }}
+          path: report-${{ matrix.baseline }}

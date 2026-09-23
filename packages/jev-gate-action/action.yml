@@ -14,13 +14,13 @@ inputs:
     required: false
     default: ${{ github.token }}
   destructive_threshold:
-    description: "P(destructive) at or above which the gate blocks."
+    description: "P(destructive) at or above which the gate blocks. Measured default from packages/eval/golden/merge-gate.json."
     required: false
-    default: "0.75"
+    default: "0.12"
   secret_threshold:
-    description: "P(secret leak) at or above which the gate blocks."
+    description: "P(secret leak) at or above which the gate blocks. Measured default from packages/eval/golden/merge-gate.json."
     required: false
-    default: "0.6"
+    default: "0.07"
   max_diff_chars:
     description: "Diff characters sent to Jev; Jev is text-only and larger diffs are truncated."
     required: false

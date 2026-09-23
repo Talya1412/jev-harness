@@ -108,14 +108,28 @@ a threshold ships. Build the set in two splits and keep them apart:
 - **holdout** — never used to choose wording. It is the generalization number,
   and it is the one worth quoting.
 
-The repo's own destructive gate is measured this way:
-[`destructive-gate.json`](golden/destructive-gate.json) (dev) and
-[`destructive-gate.holdout.json`](golden/destructive-gate.holdout.json)
-(holdout), covering clear cases, obfuscated commands (MITRE
+The repo's own gates are measured this way, in `golden/`:
+
+| dataset                         | split        | cases | questions                               |
+| ------------------------------- | ------------ | ----- | --------------------------------------- |
+| `destructive-gate.json`         | dev / tuning | 78    | `destructive` (tool call)               |
+| `destructive-gate.holdout.json` | holdout      | 89    | `destructive` (tool call)               |
+| `merge-gate.json`               | dev / tuning | 41    | `destructive` + `secret_leak` (PR diff) |
+
+Between them they cover clear cases, obfuscated commands (MITRE
 [T1027.010](https://attack.mitre.org/techniques/T1027/010/) techniques: quoting,
 command substitution, wrappers, globs, variable indirection, encoded payloads),
 injected-steering text that argues for its own classification, distractor
-context, false-positive traps, and paraphrase pairs.
+context, false-positive traps (dry runs, `kill -0`, writes to `/dev/null`),
+placeholder-vs-real credentials, and paraphrase pairs.
+
+**Holdout hygiene.** A holdout is only worth what its discipline is worth. Use
+it to _report_, then treat it as a regression reference: repeated inspection,
+re-tuning against it, or reusing it to pick wording all leak it back into
+development and turn it into a second, quieter training set. When a case in it
+surfaces a miss, do not rewrite the set — record the miss, and add fresh cases
+for the next unbiased estimate. Each dataset here carries a comment saying
+whether it has already been inspected.
 
 Two helpers keep the comparison honest when the sets are small:
 
@@ -131,19 +145,19 @@ cases.
 ### A note for case authors
 
 The API sits behind Cloudflare, which answers some shell-injection-shaped
-payloads with a `403` challenge before Jev ever sees them. This has been
-observed with IFS word-splitting — expanding the `IFS` variable to rebuild the
-spaces inside a command; quoting, command substitution, wrappers, globs,
-variable indirection, `eval`, base64/hex payloads and ANSI-C quoting all pass.
-Such a case cannot be measured through the public endpoint — probe the payload
-once before adding it, and keep the technique out of the set if the edge refuses
-it.
+payloads with a `403` challenge before Jev ever sees them. Observed so far: IFS
+word-splitting (expanding `IFS` to rebuild the spaces in a command), and a
+runtime's shell-exec helper called inline. Quoting, command substitution,
+wrappers, globs, variable indirection, `eval`, base64/hex payloads, `rev`/`xxd`
+decoding and ANSI-C quoting all pass. Such a case cannot be measured through the
+public endpoint — probe the payload once before adding it, and keep the
+technique out of the set if the edge refuses it.
 
 Keep literal payloads out of **shipped** files too. The same class of filter
 sits in front of the npm registry, so a literal payload quoted in a packaged
-README blocks `npm publish` with a bare `403` while every other package in the
-same release publishes fine — describe the technique instead of quoting the
-bytes.
+README makes `npm publish` answer `403 Forbidden` for that one package while
+every other package in the same release publishes fine — describe the technique
+instead of quoting the bytes.
 
 ## Programmatic use
 

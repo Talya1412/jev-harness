@@ -32,20 +32,25 @@ it never emits prose. See @README.md for primitives and patterns.
 - @packages/eval — calibration toolkit (`jev-eval`, `jev-tune`): binary
   metrics, reliability bins, threshold sweeps, multiclass/score metrics,
   Wilson CI, exact McNemar, paraphrase-invariance deltas, tune (f1/youden).
-  Benchmark for the destructive gate in @packages/eval/golden, TWO splits:
-  @packages/eval/golden/destructive-gate.json (dev/tuning, 69 cases) and
-  @packages/eval/golden/destructive-gate.holdout.json (holdout, 74 cases —
-  never used to choose wording). Cases carry `slice`/`pair`/`note`; the
-  report breaks metrics down per slice and reports invariance; holdout LIVE
-  recording: AUC 0.996, Brier 0.020. regression.test.ts recomputes both
-  baselines from their per-case rows and enforces per-slice floors;
+  Benchmarks in @packages/eval/golden, one baseline per dataset+question:
+  destructive-gate.json (dev, 78) + destructive-gate.holdout.json (89, kept as
+  a regression reference — see its $comment) + merge-gate.json (41, the two
+  questions jev-gate-action asks over a PR diff). Cases carry
+  `slice`/`pair`/`note`; the report breaks metrics down per slice and reports
+  invariance; holdout LIVE recording: AUC 0.998, Brier 0.018.
+  regression.test.ts globs every `*.baseline.json`, recomputes it from its own
+  per-case rows, and enforces per-slice floors (negative-only slices are gated
+  on fp==0 instead; obfuscation gets a lower recall floor);
   parity.test.ts pins TS metrics to the shared fixture that jev-py also
-  asserts. Scripts: scripts/record-baseline.mjs (live recording; retries the
+  asserts. Scripts: scripts/record-baseline.mjs (live recording; takes an
+  optional out-path because a dataset can have several questions; retries the
   Cloudflare 403s that bursts provoke), scripts/check-regression.mjs (report
   vs baseline, aggregate + slices).
 - @packages/github — `jev-review` GitHub Action (advisory PR comment).
 - @packages/jev-gate-action — `jev-gate` GitHub Action: destructive +
-  secret-leak + risk on a PR diff; advisory unless fail_on_block. Bundled
+  secret-leak + risk on a PR diff; advisory unless fail_on_block. Its two
+  thresholds are measured on @packages/eval/golden/merge-gate.json
+  (destructive 0.12, secret_leak 0.07 — both mid-gap, precision 1.00). Bundled
   dist/index.js committed.
 - @packages/pr-triage-action — PR triage action (auth impact, risk, route).
 - @packages/kit — shared adapter foundation (env config, envelope, router).
@@ -73,11 +78,13 @@ it never emits prose. See @README.md for primitives and patterns.
 - On a machine with `NODE_ENV=production`, npm omits dev dependencies — use
   `npm install --include=dev` / `npm ci --include=dev` there.
 - Never put a literal attack payload in a **shipped** file (a README that
-  `files` includes, `dist`, a bundle). The npm registry sits behind the same
-  shell-injection filter as the Jev API and answers the publish PUT with a bare
-  `403 Forbidden` while every other package in the same release publishes fine —
-  describe the technique instead of quoting the bytes. Cost two failed 0.4.0
-  release runs on 2026-09-23.
+  `files` includes, `dist`, a bundle). The registry's edge appears to apply the
+  same class of filter as the Jev API: with the payload in a packaged README,
+  `PUT @jev-harness/eval` answered `403 Forbidden` while every other package in
+  the same release published fine, and removing it fixed the publish. Payloads
+  observed blocked in request bodies: IFS word-splitting, and a runtime's
+  shell-exec helper called inline. Describe the technique instead of quoting the
+  bytes. Cost two failed 0.4.0 release runs on 2026-09-23.
 
 ## Architecture Notes
 

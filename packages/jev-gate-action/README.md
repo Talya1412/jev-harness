@@ -29,8 +29,8 @@ jobs:
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         with:
-          destructive_threshold: "0.75" # block at P(destructive) >= 0.75
-          secret_threshold: "0.6" # block at P(secret leak) >= 0.6
+          destructive_threshold: "0.12" # block at P(destructive) >= 0.12
+          secret_threshold: "0.07" # block at P(secret leak) >= 0.07
           fail_on_block: "false" # advisory by default
 ```
 
@@ -43,8 +43,38 @@ jobs:
 | `risk`        | probability-weighted risk score, 0–4          |
 | `verdict`     | `block` or `pass`                             |
 
+## Where the defaults come from
+
+Both thresholds are measured on [`packages/eval/golden/merge-gate.json`](../eval/golden/merge-gate.json)
+— 41 labeled PR diffs (12 destructive, 8 real-credential, 21 benign/placeholder) — and each sits mid-gap between
+the highest-scoring benign diff and the lowest-scoring one it must catch:
+
+| question      | default | precision | recall | at the previous default |
+| ------------- | ------- | --------- | ------ | ----------------------- |
+| `destructive` | 0.12    | 1.00      | 0.92   | 0.75 → recall 0.42      |
+| `secret_leak` | 0.07    | 1.00      | 1.00   | 0.60 → recall 0.50      |
+
+Mid-gap, not the edge of the plateau: re-recording moves individual
+probabilities by ~0.01, so the distance to the nearest benign diff is what keeps
+the default stable.
+
+Reproduce with `node packages/eval/scripts/record-baseline.mjs packages/eval/golden/merge-gate.json destructive packages/eval/golden/merge-gate.destructive.baseline.json`;
+CI's vitest gate re-checks both baselines on every run.
+
 ## Thresholds are starting points
 
-0.75 / 0.6 are defaults, not ground truth. Record your own labeled baseline
-with `@jev-harness/eval` (see `packages/eval/golden/`) and tune before
-enabling `fail_on_block`.
+The numbers above come from 41 diffs in one repository's style. Treat them as a
+starting point, not ground truth: record your own labeled baseline with
+`@jev-harness/eval` and re-tune before enabling `fail_on_block`.
+
+Two things worth knowing before you give this gate the power to block:
+
+- **Precision is what earns the right to block.** Secret detection is
+  false-positive-prone everywhere (published evaluations put Gitleaks at ~46%
+  precision); start advisory, watch what it flags, and only then set
+  `fail_on_block: "true"`.
+- **Do the non-negotiables in code.** A `DROP TABLE`, a deleted namespace, or a
+  removed backup job is a rule, not a judgment. Deterministic checks catch those
+  with no model in the path; Jev is the extra pair of eyes on the diffs that do
+  not fit a pattern. `destructive` is advisory for exactly that reason — it is a
+  high-recall first pass, not a replacement for policy.

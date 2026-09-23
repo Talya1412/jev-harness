@@ -131,8 +131,17 @@ async function run(): Promise<void> {
   const destructive = noul(response, "destructive");
   const secretLeakP = noul(response, "secret_leak");
   const risk = score(response, "risk").score;
-  const destructiveThreshold = numInput("destructive_threshold", 0.75);
-  const secretThreshold = numInput("secret_threshold", 0.6);
+  // Defaults measured on packages/eval/golden/merge-gate.json (41 labeled diffs).
+  // Both sit mid-gap between the highest-scoring benign diff and the lowest-scoring
+  // one they must catch, which is where precision is 1.00 with the most recall:
+  //   destructive 0.12 -> precision 1.00, recall 0.92  (0.75 gave precision 1.00,
+  //                       recall 0.42 — it missed 7 of 12 destructive merges)
+  //   secret_leak 0.07 -> precision 1.00, recall 1.00  (0.60 gave recall 0.50)
+  // Re-recording shifts individual probabilities by ~0.01, so mid-gap (not the
+  // edge of the plateau) is what keeps this stable. Still advisory unless
+  // fail_on_block; retune on your own labeled data.
+  const destructiveThreshold = numInput("destructive_threshold", 0.12);
+  const secretThreshold = numInput("secret_threshold", 0.07);
   const verdict =
     destructive >= destructiveThreshold || secretLeakP >= secretThreshold ? "block" : "pass";
 

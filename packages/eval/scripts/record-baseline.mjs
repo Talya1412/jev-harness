@@ -30,6 +30,7 @@ const [
   ,
   datasetPathArg = "packages/eval/golden/destructive-gate.json",
   questionIdArg = "destructive",
+  outPathArg = "",
 ] = process.argv;
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const datasetPath = resolve(repoRoot, datasetPathArg);
@@ -163,7 +164,11 @@ const baseline = {
   estimatedCostUsd: estimateCostUsd(inputTokens),
 };
 
-const outPath = datasetPath.replace(/\.json$/, ".baseline.json");
+// A dataset with several questions needs one baseline per question, so the
+// output path can be given explicitly; otherwise `<dataset>.baseline.json`.
+const outPath = outPathArg
+  ? resolve(repoRoot, outPathArg)
+  : datasetPath.replace(/\.json$/, ".baseline.json");
 writeFileSync(outPath, JSON.stringify(baseline, null, 2) + "\n", "utf8");
 
 console.log("baseline written to", outPath);
