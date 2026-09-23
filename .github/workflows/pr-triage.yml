@@ -21,7 +21,7 @@ jobs:
   triage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: ./packages/pr-triage-action
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

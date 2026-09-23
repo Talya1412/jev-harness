@@ -6,9 +6,10 @@ name: release
 #
 # Owner setup required before this workflow can succeed:
 #  1. NPM_TOKEN repository secret (npm token with publish rights to
-#     @jev-harness).
+#     @jev-harness) — or configure npm Trusted Publishing per package and
+#     drop the token entirely.
 #  2. Repo Settings → Actions → General → "Allow GitHub Actions to create
-#     and approve pull requests" must be ON, or use a PAT for GITHUB_TOKEN.
+#     and approve pull requests" must be ON.
 on:
   push:
     branches: [master]
@@ -24,8 +25,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -35,14 +36,17 @@ jobs:
       - run: |-
           git config user.name "Talya1412"
           git config user.email "99625225+Talya1412@users.noreply.github.com"
-      - uses: changesets/action@v1
+      # changesets/action@v2 renamed its inputs and no longer accepts the
+      # token through the GITHUB_TOKEN environment variable — it must be
+      # passed through the `github-token` input.
+      - uses: changesets/action@v2
         with:
-          version: npm run changeset:version
-          publish: npm run release
-          title: Version Packages
-          commit: Version Packages
+          version-script: npm run changeset:version
+          publish-script: npm run release
+          pr-title: Version Packages
+          commit-message: Version Packages
+          github-token: ${{ secrets.GITHUB_TOKEN }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
