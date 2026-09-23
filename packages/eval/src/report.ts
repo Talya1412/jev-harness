@@ -10,7 +10,9 @@ function num(x: number | null | undefined, digits = 3): string {
 }
 
 function questionLines(q: QuestionMetrics): string[] {
-  const lines: string[] = [`${q.questionId} (${q.type}, ${q.scored} scored${q.skipped ? `, ${q.skipped} skipped` : ""})`];
+  const lines: string[] = [
+    `${q.questionId} (${q.type}, ${q.scored} scored${q.skipped ? `, ${q.skipped} skipped` : ""})`,
+  ];
   if (q.noul) {
     lines.push(
       `  accuracy ${pct(q.noul.accuracy)}  precision ${pct(q.noul.precision)}  recall ${pct(q.noul.recall)}  f1 ${pct(q.noul.f1)}`,
@@ -37,7 +39,9 @@ function questionLines(q: QuestionMetrics): string[] {
     }
   }
   if (q.choice) {
-    lines.push(`  top1 ${pct(q.choice.top1)}  brier ${num(q.choice.brier, 4)}  confidence ECE ${num(q.choice.confidenceEce, 4)}`);
+    lines.push(
+      `  top1 ${pct(q.choice.top1)}  brier ${num(q.choice.brier, 4)}  confidence ECE ${num(q.choice.confidenceEce, 4)}`,
+    );
   }
   if (q.score) {
     lines.push(

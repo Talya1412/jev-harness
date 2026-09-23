@@ -19,9 +19,9 @@ describe("readConfig", () => {
   });
 
   it("strips trailing slashes so paths never double up", () => {
-    expect(readConfig({ TYPESAFE_API_KEY: "k", TYPESAFE_BASE_URL: "https://x.test///" }).baseUrl).toBe(
-      "https://x.test"
-    );
+    expect(
+      readConfig({ TYPESAFE_API_KEY: "k", TYPESAFE_BASE_URL: "https://x.test///" }).baseUrl,
+    ).toBe("https://x.test");
   });
 
   it("prefers an explicit model over the environment default", () => {
@@ -34,7 +34,7 @@ describe("readConfig", () => {
 
   it("ignores an unparseable timeout instead of producing NaN", () => {
     expect(readConfig({ TYPESAFE_API_KEY: "k", JEV_TIMEOUT_MS: "soon" }).timeoutMs).toBe(
-      DEFAULT_TIMEOUT_MS
+      DEFAULT_TIMEOUT_MS,
     );
     expect(readConfig({ TYPESAFE_API_KEY: "k", JEV_TIMEOUT_MS: "2500" }).timeoutMs).toBe(2500);
   });

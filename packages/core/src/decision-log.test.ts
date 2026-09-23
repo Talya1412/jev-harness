@@ -53,7 +53,11 @@ describe("createDecisionLog", () => {
   });
 
   it("survives a throwing sink", () => {
-    const log = createDecisionLog({ sink: () => { throw new Error("sink down"); } });
+    const log = createDecisionLog({
+      sink: () => {
+        throw new Error("sink down");
+      },
+    });
     expect(() => log.record(rec())).not.toThrow();
     expect(log.size).toBe(1);
   });

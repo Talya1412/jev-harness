@@ -99,7 +99,10 @@ describe("judgeRegression", () => {
     const { fetchImpl } = jevStub({ regression: { type: "noul", noul: 0.82 } });
     const r = await judgeRegression(
       { apiKey: "k", fetchImpl },
-      { diff: "- function login() { redirect('/home') }", behavior: "users land on /home after login" },
+      {
+        diff: "- function login() { redirect('/home') }",
+        behavior: "users land on /home after login",
+      },
     );
     expect(r.flagged).toBe(true);
   });
@@ -116,14 +119,21 @@ describe("judgeRegression", () => {
 
 describe("triageUrgency", () => {
   it("snaps the score to the nearest level", async () => {
-    const { fetchImpl } = jevStub({ urgency: { type: "score", score: 2.9, confidence: 0.7, probabilities: {} } });
-    const r = await triageUrgency({ apiKey: "k", fetchImpl }, { title: "prod down", body: "500s everywhere" });
+    const { fetchImpl } = jevStub({
+      urgency: { type: "score", score: 2.9, confidence: 0.7, probabilities: {} },
+    });
+    const r = await triageUrgency(
+      { apiKey: "k", fetchImpl },
+      { title: "prod down", body: "500s everywhere" },
+    );
     expect(r.level).toBe("Critical");
     expect(r.urgency).toBe(2.9);
   });
 
   it("rounds a low score down to Low", async () => {
-    const { fetchImpl } = jevStub({ urgency: { type: "score", score: 0.3, confidence: 0.6, probabilities: {} } });
+    const { fetchImpl } = jevStub({
+      urgency: { type: "score", score: 0.3, confidence: 0.6, probabilities: {} },
+    });
     const r = await triageUrgency({ apiKey: "k", fetchImpl }, { title: "typo in footer" });
     expect(r.level).toBe("Low");
   });
@@ -137,10 +147,13 @@ describe("chooseSubagent", () => {
     });
     const r = await chooseSubagent(
       { apiKey: "k", fetchImpl },
-      { task: "audit this auth flow", subagents: [
-        { name: "security", description: "Reviews auth and crypto." },
-        { name: "docs", description: "Rewrites prose." },
-      ] },
+      {
+        task: "audit this auth flow",
+        subagents: [
+          { name: "security", description: "Reviews auth and crypto." },
+          { name: "docs", description: "Rewrites prose." },
+        ],
+      },
     );
     expect(r.shouldDelegate).toBe(true);
     expect(r.subagent).toBe("security");
@@ -180,7 +193,12 @@ describe("chooseSubagent", () => {
 describe("debateJudge", () => {
   it("declares a clear winner", async () => {
     const { fetchImpl } = jevStub({
-      winner: { type: "choice", choice: "b", confidence: 0.81, probabilities: { a: 0.19, b: 0.81, tie: 0 } },
+      winner: {
+        type: "choice",
+        choice: "b",
+        confidence: 0.81,
+        probabilities: { a: 0.19, b: 0.81, tie: 0 },
+      },
     });
     const r = await debateJudge(
       { apiKey: "k", fetchImpl },
@@ -192,12 +210,14 @@ describe("debateJudge", () => {
 
   it("can declare a tie", async () => {
     const { fetchImpl } = jevStub({
-      winner: { type: "choice", choice: "tie", confidence: 0.6, probabilities: { a: 0.2, b: 0.2, tie: 0.6 } },
+      winner: {
+        type: "choice",
+        choice: "tie",
+        confidence: 0.6,
+        probabilities: { a: 0.2, b: 0.2, tie: 0.6 },
+      },
     });
-    const r = await debateJudge(
-      { apiKey: "k", fetchImpl },
-      { task: "explain X", a: "a", b: "a" },
-    );
+    const r = await debateJudge({ apiKey: "k", fetchImpl }, { task: "explain X", a: "a", b: "a" });
     expect(r.winner).toBe("tie");
   });
 });

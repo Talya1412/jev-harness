@@ -19,12 +19,26 @@ function jevStub(answers: JevResponse["answers"]) {
 }
 
 const n = (p: number) => ({ type: "noul" as const, noul: p });
-const c = (choice: string, confidence = 0.9) => ({ type: "choice" as const, choice, confidence, probabilities: {} });
-const s = (score: number) => ({ type: "score" as const, score, probabilities: {}, confidence: 0.8 });
+const c = (choice: string, confidence = 0.9) => ({
+  type: "choice" as const,
+  choice,
+  confidence,
+  probabilities: {},
+});
+const s = (score: number) => ({
+  type: "score" as const,
+  score,
+  probabilities: {},
+  confidence: 0.8,
+});
 
 describe("commitGate", () => {
   it("commits when safe and secret-free", async () => {
-    const { fetchImpl } = jevStub({ safe_to_commit: n(0.95), contains_secrets: n(0.01), risk: s(0.5) });
+    const { fetchImpl } = jevStub({
+      safe_to_commit: n(0.95),
+      contains_secrets: n(0.01),
+      risk: s(0.5),
+    });
     const r = await commitGate({ apiKey: "k", fetchImpl }, "diff --git a/x b/x");
     expect(r.commit).toBe(true);
     expect(r.safeToCommit).toBe(0.95);
@@ -32,14 +46,22 @@ describe("commitGate", () => {
   });
 
   it("refuses to commit when a secret is likely", async () => {
-    const { fetchImpl } = jevStub({ safe_to_commit: n(0.9), contains_secrets: n(0.9), risk: s(4.2) });
+    const { fetchImpl } = jevStub({
+      safe_to_commit: n(0.9),
+      contains_secrets: n(0.9),
+      risk: s(4.2),
+    });
     const r = await commitGate({ apiKey: "k", fetchImpl }, "diff");
     expect(r.commit).toBe(false);
     expect(r.containsSecrets).toBe(0.9);
   });
 
   it("honours a custom safety threshold", async () => {
-    const { fetchImpl } = jevStub({ safe_to_commit: n(0.6), contains_secrets: n(0.01), risk: s(1) });
+    const { fetchImpl } = jevStub({
+      safe_to_commit: n(0.6),
+      contains_secrets: n(0.01),
+      risk: s(1),
+    });
     const r = await commitGate({ apiKey: "k", fetchImpl }, "diff", { safeThreshold: 0.5 });
     expect(r.commit).toBe(true);
   });
@@ -53,7 +75,10 @@ describe("migrationSafety", () => {
       risk: s(3.9),
       verdict: c("block"),
     });
-    const r = await migrationSafety({ apiKey: "k", fetchImpl }, { summary: "DROP TABLE users;", dialect: "postgres" });
+    const r = await migrationSafety(
+      { apiKey: "k", fetchImpl },
+      { summary: "DROP TABLE users;", dialect: "postgres" },
+    );
     expect(r.verdict).toBe("block");
     expect(r.dataLoss).toBe(0.85);
     expect(r.irreversible).toBe(0.9);
@@ -94,7 +119,11 @@ describe("testPrioritizer", () => {
       "login.spec.ts",
       "billing.spec.ts",
     ]);
-    expect(r.ranked.map((x) => x.name)).toEqual(["login.spec.ts", "billing.spec.ts", "auth.spec.ts"]);
+    expect(r.ranked.map((x) => x.name)).toEqual([
+      "login.spec.ts",
+      "billing.spec.ts",
+      "auth.spec.ts",
+    ]);
     expect(r.rankedIndexes).toEqual([1, 2, 0]);
     // questions are batched: one call, one question per test
     expect(Object.keys(seen[0].questions)).toHaveLength(3);
@@ -110,7 +139,11 @@ describe("testPrioritizer", () => {
     const answers: JevResponse["answers"] = {};
     for (let i = 0; i < 40; i++) answers[`t${i}`] = n(0.5);
     const { fetchImpl, seen } = jevStub(answers);
-    const r = await testPrioritizer({ apiKey: "k", fetchImpl }, "diff", Array.from({ length: 40 }, (_, i) => `test${i}`));
+    const r = await testPrioritizer(
+      { apiKey: "k", fetchImpl },
+      "diff",
+      Array.from({ length: 40 }, (_, i) => `test${i}`),
+    );
     expect(Object.keys(seen[0].questions)).toHaveLength(30);
     expect(r.truncated).toBe(true);
   });
@@ -140,7 +173,10 @@ describe("secretLeak", () => {
     const answers: JevResponse["answers"] = {};
     for (let i = 0; i < 30; i++) answers[`s${i}`] = n(0.1);
     const { fetchImpl, seen } = jevStub(answers);
-    const r = await secretLeak({ apiKey: "k", fetchImpl }, Array.from({ length: 35 }, (_, i) => `text${i}`));
+    const r = await secretLeak(
+      { apiKey: "k", fetchImpl },
+      Array.from({ length: 35 }, (_, i) => `text${i}`),
+    );
     expect(Object.keys(seen[0].questions)).toHaveLength(30);
     expect(r.truncated).toBe(true);
   });
@@ -149,7 +185,12 @@ describe("secretLeak", () => {
 describe("dedupeItems", () => {
   it("drops later duplicates of earlier items", async () => {
     const { fetchImpl, seen } = jevStub({ d1: n(0.9), d2: n(0.05), d3: n(0.8) });
-    const r = await dedupeItems({ apiKey: "k", fetchImpl }, ["fix login", "fix the login bug", "add footer", "login fix"]);
+    const r = await dedupeItems({ apiKey: "k", fetchImpl }, [
+      "fix login",
+      "fix the login bug",
+      "add footer",
+      "login fix",
+    ]);
     expect(r.duplicateIndexes).toEqual([1, 3]);
     expect(r.unique).toEqual([
       { index: 0, item: "fix login" },
@@ -169,7 +210,10 @@ describe("dedupeItems", () => {
     const answers: JevResponse["answers"] = {};
     for (let i = 1; i < 30; i++) answers[`d${i}`] = n(0.1);
     const { fetchImpl, seen } = jevStub(answers);
-    const r = await dedupeItems({ apiKey: "k", fetchImpl }, Array.from({ length: 35 }, (_, i) => `item${i}`));
+    const r = await dedupeItems(
+      { apiKey: "k", fetchImpl },
+      Array.from({ length: 35 }, (_, i) => `item${i}`),
+    );
     expect(Object.keys(seen[0].questions)).toHaveLength(29);
     expect(r.truncated).toBe(true);
   });
@@ -181,7 +225,10 @@ describe("logSeverity", () => {
       l0: c("info", 0.7),
       l1: c("error", 0.95),
     });
-    const r = await logSeverity({ apiKey: "k", fetchImpl }, ["GET /health 200", "DB connection refused"]);
+    const r = await logSeverity({ apiKey: "k", fetchImpl }, [
+      "GET /health 200",
+      "DB connection refused",
+    ]);
     expect(r.levels).toEqual(["info", "error"]);
     expect(Object.keys(seen[0].questions)).toHaveLength(2);
     // the criteria carry the meaning, one shared map per line
@@ -198,7 +245,10 @@ describe("logSeverity", () => {
     const answers: JevResponse["answers"] = {};
     for (let i = 0; i < 30; i++) answers[`l${i}`] = c("info");
     const { fetchImpl, seen } = jevStub(answers);
-    const r = await logSeverity({ apiKey: "k", fetchImpl }, Array.from({ length: 35 }, (_, i) => `line${i}`));
+    const r = await logSeverity(
+      { apiKey: "k", fetchImpl },
+      Array.from({ length: 35 }, (_, i) => `line${i}`),
+    );
     expect(Object.keys(seen[0].questions)).toHaveLength(30);
     expect(r.levels).toHaveLength(30);
     expect(r.truncated).toBe(true);

@@ -1,12 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { askJev, noul, choice } from "../src/client.js";
-import {
-  withCache,
-  jevBatch,
-  createAuditLog,
-  withAudit,
-  localRouteSkill,
-} from "../src/infra.js";
+import { withCache, jevBatch, createAuditLog, withAudit, localRouteSkill } from "../src/infra.js";
 
 /** A fetch stub returning a canned JevResponse; records calls. */
 function jevStub(answers: any) {
@@ -26,9 +20,12 @@ describe("withCache", () => {
     let fetchCalls = 0;
     const base = (async () => {
       fetchCalls++;
-      return new Response(JSON.stringify({ model: "m", answers: { q: { type: "noul", noul: 0.5 } } }), {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({ model: "m", answers: { q: { type: "noul", noul: 0.5 } } }),
+        {
+          status: 200,
+        },
+      );
     }) as unknown as typeof fetch;
     const cfg = withCache({ apiKey: "k", fetchImpl: base });
     const q = { q: { type: "noul", instructions: "?" } };
@@ -41,9 +38,12 @@ describe("withCache", () => {
     let fetchCalls = 0;
     const base = (async () => {
       fetchCalls++;
-      return new Response(JSON.stringify({ model: "m", answers: { q: { type: "noul", noul: 0.5 } } }), {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({ model: "m", answers: { q: { type: "noul", noul: 0.5 } } }),
+        {
+          status: 200,
+        },
+      );
     }) as unknown as typeof fetch;
     const cfg = withCache({ apiKey: "k", fetchImpl: base }, { onHit: () => {} });
     await askJev(cfg, { x: 1 }, { a: { type: "noul", instructions: "?" } });
@@ -55,9 +55,12 @@ describe("withCache", () => {
     let fetchCalls = 0;
     const base = (async () => {
       fetchCalls++;
-      return new Response(JSON.stringify({ model: "m", answers: { q: { type: "noul", noul: 0.5 } } }), {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({ model: "m", answers: { q: { type: "noul", noul: 0.5 } } }),
+        {
+          status: 200,
+        },
+      );
     }) as unknown as typeof fetch;
     const cfg = withCache({ apiKey: "k", fetchImpl: base }, { maxEntries: 2 });
     const q = { q: { type: "noul", instructions: "?" } };
@@ -88,9 +91,12 @@ describe("withCache", () => {
     let fetchCalls = 0;
     const base = (async () => {
       fetchCalls++;
-      return new Response(JSON.stringify({ model: "m", answers: { q: { type: "noul", noul: 0.5 } } }), {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({ model: "m", answers: { q: { type: "noul", noul: 0.5 } } }),
+        {
+          status: 200,
+        },
+      );
     }) as unknown as typeof fetch;
     const cfg = withCache({ apiKey: "k", fetchImpl: base }, { maxEntries: 1 });
     await askJev(cfg, { x: 1 }, { q: { type: "noul", instructions: "?" } });
@@ -110,7 +116,9 @@ describe("jevBatch", () => {
     const batch = jevBatch({ apiKey: "k", fetchImpl }, { shared: "state" });
 
     const p1 = batch.add({ gate: { type: "noul", instructions: "?" } });
-    const p2 = batch.add({ best: { type: "choice", instructions: "?", criteria: { a: "x", b: "y" } } });
+    const p2 = batch.add({
+      best: { type: "choice", instructions: "?", criteria: { a: "x", b: "y" } },
+    });
     await Promise.all([p1, p2]);
 
     // exactly one network call, with namespaced keys
@@ -122,13 +130,19 @@ describe("jevBatch", () => {
     const r1 = await p1;
     const r2 = await p2;
     expect(r1.answers.gate).toEqual({ type: "noul", noul: 0.9 });
-    expect(r2.answers.best).toEqual({ type: "choice", choice: "browser", confidence: 0.8, probabilities: {} });
+    expect(r2.answers.best).toEqual({
+      type: "choice",
+      choice: "browser",
+      confidence: 0.8,
+      probabilities: {},
+    });
     expect(r1.answers.best).toBeUndefined();
     expect(r2.answers.gate).toBeUndefined();
   });
 
   it("propagates a failure to every pending caller", async () => {
-    const fetchImpl = (async () => new Response("boom", { status: 500 })) as unknown as typeof fetch;
+    const fetchImpl = (async () =>
+      new Response("boom", { status: 500 })) as unknown as typeof fetch;
     const batch = jevBatch({ apiKey: "k", fetchImpl, maxAttempts: 1 }, { s: 1 });
     const p1 = batch.add({ q: { type: "noul", instructions: "?" } });
     const p2 = batch.add({ q: { type: "noul", instructions: "?" } });
@@ -191,7 +205,9 @@ describe("createAuditLog + withAudit", () => {
     }) as unknown as typeof fetch;
     const log = createAuditLog();
     const cfg = withAudit({ apiKey: "k", fetchImpl, maxAttempts: 1 }, log);
-    await expect(askJev(cfg, { x: 1 }, { q: { type: "noul", instructions: "?" } })).rejects.toThrow();
+    await expect(
+      askJev(cfg, { x: 1 }, { q: { type: "noul", instructions: "?" } }),
+    ).rejects.toThrow();
     const [e] = log.all();
     expect(e.ok).toBe(false);
     expect(e.error).toBe("network gone");

@@ -44,7 +44,8 @@ function parseReviewers(raw: string | undefined): ReviewerCandidate[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return DEFAULT_REVIEWERS;
     return parsed.filter(
-      (x): x is ReviewerCandidate => typeof x === "object" && x !== null && typeof x.name === "string",
+      (x): x is ReviewerCandidate =>
+        typeof x === "object" && x !== null && typeof x.name === "string",
     );
   } catch {
     return DEFAULT_REVIEWERS;
@@ -87,7 +88,11 @@ function postComment(prNumber: string, body: string): boolean {
 async function main(): Promise<number> {
   const env = readEnv();
   const config = env.apiKey
-    ? ({ apiKey: env.apiKey, baseUrl: env.baseUrl, model: env.model } as { apiKey: string; baseUrl?: string; model?: string })
+    ? ({ apiKey: env.apiKey, baseUrl: env.baseUrl, model: env.model } as {
+        apiKey: string;
+        baseUrl?: string;
+        model?: string;
+      })
     : null;
 
   if (!config) {
@@ -123,7 +128,9 @@ async function main(): Promise<number> {
 main()
   .then((code) => process.exit(code))
   .catch((err) => {
-    process.stderr.write("jev-review failed: " + (err instanceof Error ? err.message : String(err)) + "\n");
+    process.stderr.write(
+      "jev-review failed: " + (err instanceof Error ? err.message : String(err)) + "\n",
+    );
     // Still exit 0: an advisory action must not break CI.
     process.exit(0);
   });

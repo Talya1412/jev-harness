@@ -32,8 +32,9 @@ function hasKey() {
 
 function clientConfig(model) {
   const apiKey = (process.env.TYPESAFE_API_KEY ?? "").trim();
-  const baseUrl = ((process.env.TYPESAFE_BASE_URL ?? "").trim() || undefined);
-  const resolvedModel = (model ?? "").trim() || (process.env.TYPESAFE_DEFAULT_MODEL ?? "").trim() || undefined;
+  const baseUrl = (process.env.TYPESAFE_BASE_URL ?? "").trim() || undefined;
+  const resolvedModel =
+    (model ?? "").trim() || (process.env.TYPESAFE_DEFAULT_MODEL ?? "").trim() || undefined;
   const raw = Number((process.env.JEV_TIMEOUT_MS ?? "").trim());
   const timeoutMs = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : undefined;
   return { apiKey: apiKey || undefined, baseUrl, model: resolvedModel, timeoutMs };
@@ -63,12 +64,17 @@ async function handleApi(req, res, url) {
       hasKey: hasKey(),
       baseUrl: process.env.TYPESAFE_BASE_URL || "https://api.typesafe.ai",
       model: process.env.TYPESAFE_DEFAULT_MODEL || "jev-latest",
-      error: hasKey() ? undefined : "TYPESAFE_API_KEY is not set in the server environment. Add it to .env.local and restart the preview.",
+      error: hasKey()
+        ? undefined
+        : "TYPESAFE_API_KEY is not set in the server environment. Add it to .env.local and restart the preview.",
     });
     return;
   }
   if (!hasKey()) {
-    send(res, 500, { error: "TYPESAFE_API_KEY is not set in the server environment. Add it to .env.local and restart the preview." });
+    send(res, 500, {
+      error:
+        "TYPESAFE_API_KEY is not set in the server environment. Add it to .env.local and restart the preview.",
+    });
     return;
   }
   if (url.pathname === "/api/models") {
@@ -85,14 +91,20 @@ async function handleApi(req, res, url) {
     try {
       body = await readJsonBody(req);
     } catch (err) {
-      send(res, 400, { error: "invalid JSON body: " + (err instanceof Error ? err.message : String(err)) });
+      send(res, 400, {
+        error: "invalid JSON body: " + (err instanceof Error ? err.message : String(err)),
+      });
       return;
     }
     if (body.state === undefined || body.state === null) {
       send(res, 400, { error: "state is required" });
       return;
     }
-    if (!body.questions || typeof body.questions !== "object" || Object.keys(body.questions).length === 0) {
+    if (
+      !body.questions ||
+      typeof body.questions !== "object" ||
+      Object.keys(body.questions).length === 0
+    ) {
       send(res, 400, { error: "questions must be a non-empty object" });
       return;
     }
@@ -130,11 +142,14 @@ const server = createServer(async (req, res) => {
     const type = MIME[filePath.slice(filePath.lastIndexOf("."))] ?? "application/octet-stream";
     send(res, 200, data, type);
   } catch (err) {
-    const status = err && typeof err === "object" && "code" in err && err.code === "ENOENT" ? 404 : 500;
+    const status =
+      err && typeof err === "object" && "code" in err && err.code === "ENOENT" ? 404 : 500;
     send(res, status, { error: status === 404 ? "not found" : String(err) });
   }
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Jev playground listening on http://${HOST}:${PORT} (key: ${hasKey() ? "configured" : "MISSING"})`);
+  console.log(
+    `Jev playground listening on http://${HOST}:${PORT} (key: ${hasKey() ? "configured" : "MISSING"})`,
+  );
 });

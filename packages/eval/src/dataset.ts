@@ -46,7 +46,8 @@ export function parseDatasetJson(text: string): EvalDataset {
     return { questions: {}, cases: parsed.map((c, i) => toCase(c as Record<string, unknown>, i)) };
   }
   const obj = parsed as { questions?: Questions; cases?: unknown[] };
-  if (!obj || typeof obj !== "object") throw new Error("dataset JSON must be an object or an array of cases");
+  if (!obj || typeof obj !== "object")
+    throw new Error("dataset JSON must be an object or an array of cases");
   return {
     questions: obj.questions ?? {},
     cases: (obj.cases ?? []).map((c, i) => toCase(c as Record<string, unknown>, i)),
@@ -65,7 +66,7 @@ export function parseDatasetJsonl(text: string): EvalDataset {
       obj = JSON.parse(trimmed) as { questions?: Questions } & Record<string, unknown>;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`invalid JSONL on line ${i + 1}: ${msg}`);
+      throw new Error(`invalid JSONL on line ${i + 1}: ${msg}`, { cause: err });
     }
     if (obj.questions) Object.assign(questions, obj.questions);
     cases.push(toCase(obj, cases.length));

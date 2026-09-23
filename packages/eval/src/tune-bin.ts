@@ -18,7 +18,9 @@ let text: string;
 try {
   text = parsed.options.file ? readFileSync(parsed.options.file, "utf8") : readFileSync(0, "utf8");
 } catch (err: unknown) {
-  console.error("jev-tune: cannot read input: " + (err instanceof Error ? err.message : String(err)));
+  console.error(
+    "jev-tune: cannot read input: " + (err instanceof Error ? err.message : String(err)),
+  );
   process.exit(2);
 }
 

@@ -65,7 +65,10 @@ var BUILTIN_REDACT_PATTERNS = [
 ];
 function redactText(text, opts = {}) {
   let out = text;
-  const patterns = opts.extra?.length ? [...BUILTIN_REDACT_PATTERNS, ...opts.extra.map((p) => ({ label: "custom", pattern: p }))] : BUILTIN_REDACT_PATTERNS;
+  const patterns = opts.extra?.length ? [
+    ...BUILTIN_REDACT_PATTERNS,
+    ...opts.extra.map((p) => ({ label: "custom", pattern: p }))
+  ] : BUILTIN_REDACT_PATTERNS;
   for (const { label, pattern, replace } of patterns) {
     out = out.replace(pattern, replace ?? `${PLACEHOLDER}:${label}]`);
   }
@@ -93,7 +96,10 @@ function walk(value, depth, opts) {
     return redactText(value.toISOString(), opts);
   }
   if (value instanceof Map) {
-    return Array.from(value.entries(), ([k, v]) => [walk(k, depth + 1, opts), walk(v, depth + 1, opts)]);
+    return Array.from(value.entries(), ([k, v]) => [
+      walk(k, depth + 1, opts),
+      walk(v, depth + 1, opts)
+    ]);
   }
   if (value instanceof Set) {
     return Array.from(value, (v) => walk(v, depth + 1, opts));
@@ -141,7 +147,9 @@ function validateQuestions(questions) {
     if (!q || typeof q !== "object")
       throw new JevError(`question "${key}" must be an object`, { retryable: false });
     if (!q.instructions || typeof q.instructions !== "string") {
-      throw new JevError(`question "${key}" needs a non-empty instructions string`, { retryable: false });
+      throw new JevError(`question "${key}" needs a non-empty instructions string`, {
+        retryable: false
+      });
     }
     if (q.type === "choice") {
       const n = Object.keys(q.criteria ?? {}).length;
@@ -152,7 +160,9 @@ function validateQuestions(questions) {
       if (n < 2)
         throw new JevError(`score "${key}" needs at least 2 ordered levels`, { retryable: false });
     } else if (q.type !== "noul") {
-      throw new JevError(`question "${key}" has unknown type "${q.type}"`, { retryable: false });
+      throw new JevError(`question "${key}" has unknown type "${q.type}"`, {
+        retryable: false
+      });
     }
   }
 }
@@ -192,7 +202,10 @@ async function askJev(config, state, questions, signal) {
       });
       if (res.status === 429 || res.status >= 500) {
         const text = await res.text().catch(() => "");
-        lastError = new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 300)}`, { status: res.status, retryable: true });
+        lastError = new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 300)}`, {
+          status: res.status,
+          retryable: true
+        });
         if (attempt < cfg.maxAttempts) {
           cfg.onRetry?.(attempt, lastError);
           await sleep(250 * attempt * attempt);
@@ -202,7 +215,10 @@ async function askJev(config, state, questions, signal) {
       }
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 500)}`, { status: res.status, retryable: false });
+        throw new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 500)}`, {
+          status: res.status,
+          retryable: false
+        });
       }
       let parsed;
       const raw = await res.text();

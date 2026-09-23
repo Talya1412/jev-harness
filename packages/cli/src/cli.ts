@@ -88,8 +88,12 @@ function parseCommonFlags(argv: string[]): { args: SimpleArgs; rest: Array<[stri
       return v;
     };
     switch (flag) {
-      case "--model": args.model = next(); break;
-      case "--base-url": args.baseUrl = next(); break;
+      case "--model":
+        args.model = next();
+        break;
+      case "--base-url":
+        args.baseUrl = next();
+        break;
       case "--timeout-ms": {
         // Shared capped parser: huge values cannot overflow setTimeout into ~1ms.
         const n = parseTimeoutMs(next());
@@ -97,8 +101,12 @@ function parseCommonFlags(argv: string[]): { args: SimpleArgs; rest: Array<[stri
         args.timeoutMs = n;
         break;
       }
-      case "-h": case "--help": args.help = true; break;
-      default: rest.push([flag, next()]);
+      case "-h":
+      case "--help":
+        args.help = true;
+        break;
+      default:
+        rest.push([flag, next()]);
     }
   }
   return { args, rest };
@@ -127,7 +135,9 @@ function parseJson(text: string, label: string): unknown {
   try {
     return JSON.parse(text);
   } catch (err) {
-    throw new UsageError(`${label} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+    throw new UsageError(
+      `${label} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
@@ -140,7 +150,8 @@ async function resolveJsonInput(raw: string, stdin: string, label: string): Prom
     if (!stdin.trim()) throw new UsageError(`${label}: '-' means stdin but stdin is empty`);
     return parseJson(stdin, label);
   }
-  if (raw.trimStart().startsWith("{") || raw.trimStart().startsWith("[")) return parseJson(raw, label);
+  if (raw.trimStart().startsWith("{") || raw.trimStart().startsWith("["))
+    return parseJson(raw, label);
   let text: string;
   try {
     text = await readFile(raw, "utf8");
@@ -154,7 +165,10 @@ async function resolveJsonInput(raw: string, stdin: string, label: string): Prom
 }
 
 /** Env config + per-call flag overrides + injectable fetch. */
-function buildConfig(opts: { model?: string; baseUrl?: string; timeoutMs?: number }, io: CliIo): JevConfig {
+function buildConfig(
+  opts: { model?: string; baseUrl?: string; timeoutMs?: number },
+  io: CliIo,
+): JevConfig {
   const cfg = resolveEnvConfig({ requireKey: true, modelOverride: opts.model });
   if (opts.baseUrl) cfg.baseUrl = opts.baseUrl.replace(/\/+$/, "");
   if (opts.timeoutMs !== undefined) cfg.timeoutMs = opts.timeoutMs;
@@ -178,7 +192,12 @@ async function askCommand(argv: string[], io: CliIo): Promise<number> {
     questions = await resolveJsonInput(args.questions, stdin, "--questions");
   } else if (stdin.trim()) {
     const env = tryParse(stdin);
-    if (env && typeof env === "object" && env !== null && "questions" in (env as Record<string, unknown>)) {
+    if (
+      env &&
+      typeof env === "object" &&
+      env !== null &&
+      "questions" in (env as Record<string, unknown>)
+    ) {
       questions = (env as Record<string, unknown>).questions;
       envelopeState = (env as Record<string, unknown>).state;
       hasEnvelope = true;
@@ -186,7 +205,7 @@ async function askCommand(argv: string[], io: CliIo): Promise<number> {
   }
   if (questions === undefined) {
     throw new UsageError(
-      "questions are required: pass --questions <file|json|-> or pipe {\"state\":...,\"questions\":...} to stdin",
+      'questions are required: pass --questions <file|json|-> or pipe {"state":...,"questions":...} to stdin',
     );
   }
 
@@ -212,7 +231,9 @@ async function modelsCommand(argv: string[], io: CliIo): Promise<number> {
 
 async function evalCommand(argv: string[], io: CliIo): Promise<number> {
   if (argv.includes("-h") || argv.includes("--help")) {
-    io.out("jev eval — evaluate Jev questions against a labeled dataset\n\nDelegates to jev-eval.\n\n");
+    io.out(
+      "jev eval — evaluate Jev questions against a labeled dataset\n\nDelegates to jev-eval.\n\n",
+    );
     return runEvalCli(["--help"], { out: io.out, err: io.err });
   }
   return runEvalCli(argv, { out: io.out, err: io.err });
@@ -240,9 +261,12 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
 
   try {
     switch (command) {
-      case "ask": return await askCommand(rest, sinks);
-      case "models": return await modelsCommand(rest, sinks);
-      case "eval": return await evalCommand(rest, sinks);
+      case "ask":
+        return await askCommand(rest, sinks);
+      case "models":
+        return await modelsCommand(rest, sinks);
+      case "eval":
+        return await evalCommand(rest, sinks);
       default:
         sinks.err(`unknown command: ${command} (try \`jev help\`)\n`);
         return 2;

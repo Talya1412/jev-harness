@@ -92,7 +92,12 @@ describe("loadDataset", () => {
 });
 
 describe("formatSummary", () => {
-  const summary = tune([{ p: 0.1, y: 0 }, { p: 0.9, y: 1 }, { p: 0.5, y: 0 }, { p: 0.5, y: 1 }]);
+  const summary = tune([
+    { p: 0.1, y: 0 },
+    { p: 0.9, y: 1 },
+    { p: 0.5, y: 0 },
+    { p: 0.5, y: 1 },
+  ]);
 
   it("renders a human report with the best threshold and metrics", () => {
     const out = formatSummary(summary, false);

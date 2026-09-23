@@ -45,8 +45,13 @@ export function denyPayload(toolName, probability, threshold) {
         hookSpecificOutput: {
             hookEventName: "PreToolUse",
             permissionDecision: "deny",
-            permissionDecisionReason: "Jev judged this " + toolName + " call destructive (p=" + probability.toFixed(2) +
-                " >= " + threshold + "). Review it before retrying.",
+            permissionDecisionReason: "Jev judged this " +
+                toolName +
+                " call destructive (p=" +
+                probability.toFixed(2) +
+                " >= " +
+                threshold +
+                "). Review it before retrying.",
         },
     };
 }
@@ -58,8 +63,11 @@ export function skillPayload(skill, confidence) {
     return {
         hookSpecificOutput: {
             hookEventName: "UserPromptSubmit",
-            additionalContext: "Jev skill suggestion (confidence " + (confidence * 100).toFixed(0) +
-                '%): this prompt looks like a job for the "' + skill + '" skill. Consider loading it if it is available.',
+            additionalContext: "Jev skill suggestion (confidence " +
+                (confidence * 100).toFixed(0) +
+                '%): this prompt looks like a job for the "' +
+                skill +
+                '" skill. Consider loading it if it is available.',
         },
     };
 }

@@ -97,7 +97,14 @@ describe("resolveState", () => {
   it("errors on an unreadable file instead of judging an empty state", async () => {
     const { resolveState } = await import("../src/gate.js");
     const opts = { ...ok(["-c", "x", "-f", "missing.txt"]), file: "missing.txt" };
-    const out = resolveState(opts, sources({ file: () => { throw new Error("ENOENT"); } }));
+    const out = resolveState(
+      opts,
+      sources({
+        file: () => {
+          throw new Error("ENOENT");
+        },
+      }),
+    );
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.error).toContain("missing.txt");
   });

@@ -19,7 +19,16 @@ const clean = [
 describe("binaryMetrics", () => {
   it("computes confusion, accuracy, f1, brier and auc", () => {
     const m = binaryMetrics(clean, 0.5);
-    expect(m).toMatchObject({ n: 4, tp: 2, fp: 0, tn: 2, fn: 0, accuracy: 1, precision: 1, recall: 1 });
+    expect(m).toMatchObject({
+      n: 4,
+      tp: 2,
+      fp: 0,
+      tn: 2,
+      fn: 0,
+      accuracy: 1,
+      precision: 1,
+      recall: 1,
+    });
     expect(m.f1).toBe(1);
     expect(m.brier).toBeCloseTo(0.075, 10);
     expect(m.auc).toBe(1);
@@ -38,12 +47,22 @@ describe("binaryMetrics", () => {
   });
 
   it("ranks a pessimistic model at auc 0", () => {
-    expect(binaryMetrics([{ p: 0.8, y: 0 }, { p: 0.4, y: 1 }]).auc).toBe(0);
+    expect(
+      binaryMetrics([
+        { p: 0.8, y: 0 },
+        { p: 0.4, y: 1 },
+      ]).auc,
+    ).toBe(0);
   });
 
   it("handles ties with average ranks", () => {
     // pos 0.5, neg 0.5 → one tie → auc 0.5
-    expect(binaryMetrics([{ p: 0.5, y: 1 }, { p: 0.5, y: 0 }]).auc).toBe(0.5);
+    expect(
+      binaryMetrics([
+        { p: 0.5, y: 1 },
+        { p: 0.5, y: 0 },
+      ]).auc,
+    ).toBe(0.5);
   });
 });
 

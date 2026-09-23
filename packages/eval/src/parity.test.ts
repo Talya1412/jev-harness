@@ -12,7 +12,12 @@ import type { BinaryPair } from "./metrics.js";
  * embedded expected values to within tolerance, so metric drift on either
  * side fails CI.
  */
-const fixturePath = join(resolve(dirname(fileURLToPath(import.meta.url))), "..", "golden", "parity-metrics.json");
+const fixturePath = join(
+  resolve(dirname(fileURLToPath(import.meta.url))),
+  "..",
+  "golden",
+  "parity-metrics.json",
+);
 const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
   pairs: Array<{ p: number; y: 0 | 1 }>;
   threshold: number;
@@ -40,8 +45,10 @@ const t = tune(pairs);
 
 describe("TS metrics reproduce the shared parity fixture", () => {
   it("brier", () => expect(Math.abs(m.brier - fixture.expected.brier)).toBeLessThanOrEqual(tol));
-  it("auc (tie-safe Mann-Whitney)", () => expect(Math.abs((m.auc ?? 0) - fixture.expected.auc!)).toBeLessThanOrEqual(tol));
-  it("accuracy", () => expect(Math.abs(m.accuracy - fixture.expected.accuracy)).toBeLessThanOrEqual(tol));
+  it("auc (tie-safe Mann-Whitney)", () =>
+    expect(Math.abs((m.auc ?? 0) - fixture.expected.auc!)).toBeLessThanOrEqual(tol));
+  it("accuracy", () =>
+    expect(Math.abs(m.accuracy - fixture.expected.accuracy)).toBeLessThanOrEqual(tol));
   it("confusion counts", () => {
     expect(m.tp).toBe(fixture.expected.confusion.tp);
     expect(m.fp).toBe(fixture.expected.confusion.fp);
@@ -53,8 +60,10 @@ describe("TS metrics reproduce the shared parity fixture", () => {
     expect(Math.abs((m.recall ?? 0) - fixture.expected.recall!)).toBeLessThanOrEqual(tol);
     expect(Math.abs((m.f1 ?? 0) - fixture.expected.f1!)).toBeLessThanOrEqual(tol);
   });
-  it("ece (binned calibration)", () => expect(Math.abs(ece(pairs, fixture.bins) - fixture.expected.ece)).toBeLessThanOrEqual(tol));
-  it("prAuc (average precision)", () => expect(Math.abs((prAuc(pairs) ?? 0) - fixture.expected.prAuc!)).toBeLessThanOrEqual(tol));
+  it("ece (binned calibration)", () =>
+    expect(Math.abs(ece(pairs, fixture.bins) - fixture.expected.ece)).toBeLessThanOrEqual(tol));
+  it("prAuc (average precision)", () =>
+    expect(Math.abs((prAuc(pairs) ?? 0) - fixture.expected.prAuc!)).toBeLessThanOrEqual(tol));
   it("tune: best threshold, best f1, sweep length", () => {
     expect(Math.abs(t.bestThreshold - fixture.expected.tuneBestThreshold)).toBeLessThanOrEqual(tol);
     expect(Math.abs((t.atBest.f1 ?? 0) - fixture.expected.tuneBestF1!)).toBeLessThanOrEqual(tol);

@@ -29,19 +29,19 @@ jobs:
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         with:
-          destructive_threshold: "0.75"   # block at P(destructive) >= 0.75
-          secret_threshold: "0.6"         # block at P(secret leak) >= 0.6
-          fail_on_block: "false"          # advisory by default
+          destructive_threshold: "0.75" # block at P(destructive) >= 0.75
+          secret_threshold: "0.6" # block at P(secret leak) >= 0.6
+          fail_on_block: "false" # advisory by default
 ```
 
 ## Outputs
 
-| output | meaning |
-|---|---|
+| output        | meaning                                       |
+| ------------- | --------------------------------------------- |
 | `destructive` | P(merging destroys data/history/system state) |
-| `secret_leak` | P(diff embeds a real credential) |
-| `risk` | probability-weighted risk score, 0–4 |
-| `verdict` | `block` or `pass` |
+| `secret_leak` | P(diff embeds a real credential)              |
+| `risk`        | probability-weighted risk score, 0–4          |
+| `verdict`     | `block` or `pass`                             |
 
 ## Thresholds are starting points
 

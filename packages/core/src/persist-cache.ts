@@ -69,7 +69,11 @@ export function createPersistentCache(opts: PersistentCacheOptions): PersistentJ
       rows.sort((a, b) => a[1].seq - b[1].seq);
       for (const [key, entry] of rows) {
         if (typeof entry?.expiresAt === "number" && entry.expiresAt > now && entry.response) {
-          entries.set(key, { response: entry.response, expiresAt: entry.expiresAt, seq: entry.seq });
+          entries.set(key, {
+            response: entry.response,
+            expiresAt: entry.expiresAt,
+            seq: entry.seq,
+          });
           nextSeq = Math.max(nextSeq, entry.seq + 1);
         }
       }

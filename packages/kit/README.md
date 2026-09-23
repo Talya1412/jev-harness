@@ -11,12 +11,12 @@ adapters.
 
 ## API
 
-| Export | Purpose |
-|---|---|
-| `resolveEnvConfig(opts?)` | Resolve `TYPESAFE_API_KEY` / `TYPESAFE_BASE_URL` / `TYPESAFE_DEFAULT_MODEL` / `JEV_TIMEOUT_MS` into a `JevConfig`. `requireKey: true` throws on a missing key (strict adapters); otherwise the empty-key config flows through the caller's fail-open path. |
-| `createJevToolkit({ requireKey? })` | Config + core-pattern plumbing (`ask`, `models`, `routeSkills`, `pickTool`, `browseAction`), resolved fresh per call with an optional per-call model override. |
-| `okResult(text, details?)` / `errorResult(tool, err)` | The standard `{ content: [{ type: "text", text }], details }` envelope and fail-open error rendering. |
-| `lexicalShortlist(text, roster, opts?)` | Score skill names against a message before spending a Jev call; falls back to the full roster when nothing matches lexically. |
+| Export                                                | Purpose                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolveEnvConfig(opts?)`                             | Resolve `TYPESAFE_API_KEY` / `TYPESAFE_BASE_URL` / `TYPESAFE_DEFAULT_MODEL` / `JEV_TIMEOUT_MS` into a `JevConfig`. `requireKey: true` throws on a missing key (strict adapters); otherwise the empty-key config flows through the caller's fail-open path. |
+| `createJevToolkit({ requireKey? })`                   | Config + core-pattern plumbing (`ask`, `models`, `routeSkills`, `pickTool`, `browseAction`), resolved fresh per call with an optional per-call model override.                                                                                             |
+| `okResult(text, details?)` / `errorResult(tool, err)` | The standard `{ content: [{ type: "text", text }], details }` envelope and fail-open error rendering.                                                                                                                                                      |
+| `lexicalShortlist(text, roster, opts?)`               | Score skill names against a message before spending a Jev call; falls back to the full roster when nothing matches lexically.                                                                                                                              |
 
 ## Failure policies
 

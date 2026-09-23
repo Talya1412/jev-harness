@@ -197,7 +197,10 @@ export async function chooseSubagent(
     return { delegate: 0, shouldDelegate: false, subagent: null, confidence: 0 };
   }
   if (shortlist.some((s) => s.name === "none")) {
-    throw new JevError('chooseSubagent: "none" is reserved for the inline-handling option; rename the subagent', { retryable: false });
+    throw new JevError(
+      'chooseSubagent: "none" is reserved for the inline-handling option; rename the subagent',
+      { retryable: false },
+    );
   }
   const criteria: Record<string, string> = {
     none: "No listed subagent is the right fit; handle inline.",
@@ -229,9 +232,16 @@ export async function chooseSubagent(
   const delegate = noul(response, "delegate");
   const picked = choice(response, "pick");
   const sub =
-    picked.choice && picked.choice !== "none" && picked.confidence >= minConfidence ? picked.choice : null;
+    picked.choice && picked.choice !== "none" && picked.confidence >= minConfidence
+      ? picked.choice
+      : null;
   const shouldDelegate = delegate >= delegateThreshold && sub !== null;
-  return { delegate, shouldDelegate, subagent: shouldDelegate ? sub : null, confidence: picked.confidence };
+  return {
+    delegate,
+    shouldDelegate,
+    subagent: shouldDelegate ? sub : null,
+    confidence: picked.confidence,
+  };
 }
 
 /** Adjudicate two competing outputs; pick the more sound one (or a tie). */
@@ -239,7 +249,11 @@ export async function debateJudge(
   config: JevConfig,
   input: { task: string; a: string; b: string },
   options: { signal?: AbortSignal } = {},
-): Promise<{ winner: "a" | "b" | "tie"; confidence: number; probabilities: Record<string, number> }> {
+): Promise<{
+  winner: "a" | "b" | "tie";
+  confidence: number;
+  probabilities: Record<string, number>;
+}> {
   const response = await askJev(
     config,
     {

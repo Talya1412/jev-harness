@@ -68,7 +68,8 @@ export function flatten(messages: readonly unknown[]): FlatMsg[] {
         const c = b.content;
         let tr = "";
         if (typeof c === "string") tr = c;
-        else if (Array.isArray(c)) tr = c.map((x: any) => (typeof x === "string" ? x : x?.text ?? "")).join("\n");
+        else if (Array.isArray(c))
+          tr = c.map((x: any) => (typeof x === "string" ? x : (x?.text ?? ""))).join("\n");
         else if (c != null) tr = JSON.stringify(c);
         toolResults.push({ id: String(b.tool_use_id ?? b.toolUseId ?? ""), text: tr });
       }
@@ -87,7 +88,13 @@ export function collectCalls(msgs: readonly FlatMsg[]): CompactCall[] {
   for (const m of msgs) {
     for (const u of m.toolUses) {
       if (u.id && !byId.has(u.id)) {
-        byId.set(u.id, { id: u.id, tool: u.tool, input: u.input, resultChars: 0, resultText: null });
+        byId.set(u.id, {
+          id: u.id,
+          tool: u.tool,
+          input: u.input,
+          resultChars: 0,
+          resultText: null,
+        });
       }
     }
     for (const r of m.toolResults) {
@@ -120,7 +127,10 @@ export function buildCompactState(msgs: readonly FlatMsg[]): unknown {
   return {
     conversation: msgs.map((m) => ({
       role: m.role,
-      text: m.text.length > 4000 ? m.text.slice(0, 3000) + "\n...[truncated]...\n" + m.text.slice(-900) : m.text,
+      text:
+        m.text.length > 4000
+          ? m.text.slice(0, 3000) + "\n...[truncated]...\n" + m.text.slice(-900)
+          : m.text,
       tool_calls: m.toolUses.map((u) => ({ id: u.id, tool: u.tool, input: u.input })),
       tool_results: m.toolResults.map((r) => ({
         id: r.id,
@@ -137,14 +147,24 @@ function questionsForCall(c: CompactCall): Questions {
     ["call_" + c.id]: {
       type: "noul",
       instructions:
-        "Tool call " + c.id + " (" + c.tool + ") should stay in the history: knowing this call was made, with its input, still matters for what the assistant does next",
+        "Tool call " +
+        c.id +
+        " (" +
+        c.tool +
+        ") should stay in the history: knowing this call was made, with its input, still matters for what the assistant does next",
     },
   });
   Object.assign(q, {
     ["result_" + c.id]: {
       type: "noul",
       instructions:
-        "The full output of tool call " + c.id + " (" + c.tool + ", " + c.resultChars + " chars) should stay in the history verbatim: the assistant still needs its contents and re-running the tool would not do",
+        "The full output of tool call " +
+        c.id +
+        " (" +
+        c.tool +
+        ", " +
+        c.resultChars +
+        " chars) should stay in the history verbatim: the assistant still needs its contents and re-running the tool would not do",
     },
   });
   return q;
@@ -161,7 +181,7 @@ export function reduceCallQuestions(calls: readonly CompactCall[]): Questions {
 export function batchCompactCalls(
   calls: readonly CompactCall[],
   stateTokens: number,
-  budget: number
+  budget: number,
 ): CompactCall[][] {
   const perCall = estimateTokens(JSON.stringify(reduceCallQuestions(calls.slice(0, 1))));
   const maxPerBatch = Math.max(1, Math.floor((budget - stateTokens - 20) / Math.max(1, perCall)));
@@ -195,7 +215,8 @@ export interface CompactionPlan {
 }
 
 /** Why a region was left to native compaction. */
-export type DeferralReason = "no-messages" | "no-calls" | "state-too-large" | "insufficient-reduction";
+export type DeferralReason =
+  "no-messages" | "no-calls" | "state-too-large" | "insufficient-reduction";
 
 export type CompactionOutcome =
   | { kind: "compacted"; plan: CompactionPlan }
@@ -219,7 +240,11 @@ export async function planCompaction(prep: CompactionPrep): Promise<CompactionOu
   const state = buildCompactState(flat);
   const stateTokens = estimateTokens(JSON.stringify(state));
   if (stateTokens > prep.effective.maxStateTokens) {
-    return { kind: "defer", reason: "state-too-large", detail: { stateTokens, maxStateTokens: prep.effective.maxStateTokens } };
+    return {
+      kind: "defer",
+      reason: "state-too-large",
+      detail: { stateTokens, maxStateTokens: prep.effective.maxStateTokens },
+    };
   }
 
   const batches = batchCompactCalls(calls, stateTokens, prep.effective.maxRequestTokens);
@@ -235,12 +260,18 @@ export async function planCompaction(prep: CompactionPrep): Promise<CompactionOu
     const keepCall = keepProb("call_" + c.id);
     const keepResult = keepProb("result_" + c.id);
     // allowDroppingCalls defaults false: a low score loses the output, never the record.
-    const action = keepResult >= prep.effective.keepThreshold ? ("keep" as const) : ("drop_result" as const);
+    const action =
+      keepResult >= prep.effective.keepThreshold ? ("keep" as const) : ("drop_result" as const);
     return { call: c, action, keepCall, keepResult };
   });
 
-  const dropped = decisions.filter((d) => d.action === "drop_result" && d.call.resultChars > prep.effective.truncateHeadChars);
-  const savedChars = dropped.reduce((n, d) => n + (d.call.resultChars - prep.effective.truncateHeadChars), 0);
+  const dropped = decisions.filter(
+    (d) => d.action === "drop_result" && d.call.resultChars > prep.effective.truncateHeadChars,
+  );
+  const savedChars = dropped.reduce(
+    (n, d) => n + (d.call.resultChars - prep.effective.truncateHeadChars),
+    0,
+  );
   const totalChars = calls.reduce((n, c) => n + c.resultChars, 0);
   if (totalChars === 0 || savedChars / totalChars < prep.effective.minReductionRatio) {
     return { kind: "defer", reason: "insufficient-reduction", detail: { savedChars, totalChars } };
@@ -254,12 +285,19 @@ export async function planCompaction(prep: CompactionPrep): Promise<CompactionOu
         if (m.text) parts.push(m.text);
         for (const u of m.toolUses) {
           const t = truncById.get(u.id);
-          parts.push("[tool_use id=" + u.id + " name=" + u.tool + " input=" + JSON.stringify(u.input) + "]");
+          parts.push(
+            "[tool_use id=" + u.id + " name=" + u.tool + " input=" + JSON.stringify(u.input) + "]",
+          );
           if (t && t.resultText != null) {
             const full: string = t.resultText;
             parts.push(
-              "[tool_result id=" + u.id + "] " + full.slice(0, prep.effective.truncateHeadChars) +
-              "\n[..." + (t.resultChars - prep.effective.truncateHeadChars) + " chars omitted by jev_compact; re-run the tool to recover]"
+              "[tool_result id=" +
+                u.id +
+                "] " +
+                full.slice(0, prep.effective.truncateHeadChars) +
+                "\n[..." +
+                (t.resultChars - prep.effective.truncateHeadChars) +
+                " chars omitted by jev_compact; re-run the tool to recover]",
             );
           }
         }
@@ -269,8 +307,13 @@ export async function planCompaction(prep: CompactionPrep): Promise<CompactionOu
           if (t && t.resultText != null) {
             const full: string = t.resultText;
             parts.push(
-              "[tool_result id=" + r.id + "] " + full.slice(0, prep.effective.truncateHeadChars) +
-              "\n[..." + (t.resultChars - prep.effective.truncateHeadChars) + " chars omitted by jev_compact]"
+              "[tool_result id=" +
+                r.id +
+                "] " +
+                full.slice(0, prep.effective.truncateHeadChars) +
+                "\n[..." +
+                (t.resultChars - prep.effective.truncateHeadChars) +
+                " chars omitted by jev_compact]",
             );
           } else {
             parts.push("[tool_result id=" + r.id + "] " + r.text);
@@ -282,7 +325,10 @@ export async function planCompaction(prep: CompactionPrep): Promise<CompactionOu
       .join("\n\n");
 
   const summary =
-    "Verbatim history retained; " + dropped.length + " tool output(s) truncated by Jev decisions.\n\n" + render(flat);
+    "Verbatim history retained; " +
+    dropped.length +
+    " tool output(s) truncated by Jev decisions.\n\n" +
+    render(flat);
 
   return { kind: "compacted", plan: { decisions, dropped, savedChars, totalChars, summary } };
 }

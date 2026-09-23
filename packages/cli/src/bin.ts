@@ -7,6 +7,8 @@ runCli(process.argv.slice(2))
     if (code !== 0) process.exit(code);
   })
   .catch((err) => {
-    process.stderr.write("jev failed: " + (err instanceof Error ? err.message : String(err)) + "\n");
+    process.stderr.write(
+      "jev failed: " + (err instanceof Error ? err.message : String(err)) + "\n",
+    );
     process.exit(1);
   });

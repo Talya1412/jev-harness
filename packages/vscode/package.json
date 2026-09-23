@@ -6,22 +6,54 @@
   "private": true,
   "publisher": "jev-harness",
   "license": "Apache-2.0",
-  "engines": { "vscode": "^1.80.0" },
-  "categories": ["Other", "Machine Learning", "Linters"],
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Linters"
+  ],
   "main": "./extension.js",
   "activationEvents": [],
   "contributes": {
     "commands": [
-      { "command": "jev-harness.review", "title": "jev: review active file for destructive changes", "category": "jev-harness" },
-      { "command": "jev-harness.verify", "title": "jev: verify selection as a claim", "category": "jev-harness" }
+      {
+        "command": "jev-harness.review",
+        "title": "jev: review active file for destructive changes",
+        "category": "jev-harness"
+      },
+      {
+        "command": "jev-harness.verify",
+        "title": "jev: verify selection as a claim",
+        "category": "jev-harness"
+      }
     ],
     "configuration": {
       "title": "jev-harness",
       "properties": {
-        "jev-harness.apiKey": { "type": "string", "default": "", "markdownDescription": "TypeSafe API key. Falls back to `TYPESAFE_API_KEY`. Without a key the commands are fail-open and only explain." },
-        "jev-harness.baseUrl": { "type": "string", "default": "https://api.typesafe.ai", "markdownDescription": "Jev base URL. Point at a proxy if your network requires it." },
-        "jev-harness.model": { "type": "string", "default": "jev-latest", "markdownDescription": "Model id." },
-        "jev-harness.threshold": { "type": "number", "default": 0.75, "minimum": 0, "maximum": 1, "markdownDescription": "Destructive-gate threshold. 0.75 is tuned to be the one true veto." }
+        "jev-harness.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "TypeSafe API key. Falls back to `TYPESAFE_API_KEY`. Without a key the commands are fail-open and only explain."
+        },
+        "jev-harness.baseUrl": {
+          "type": "string",
+          "default": "https://api.typesafe.ai",
+          "markdownDescription": "Jev base URL. Point at a proxy if your network requires it."
+        },
+        "jev-harness.model": {
+          "type": "string",
+          "default": "jev-latest",
+          "markdownDescription": "Model id."
+        },
+        "jev-harness.threshold": {
+          "type": "number",
+          "default": 0.75,
+          "minimum": 0,
+          "maximum": 1,
+          "markdownDescription": "Destructive-gate threshold. 0.75 is tuned to be the one true veto."
+        }
       }
     }
   },

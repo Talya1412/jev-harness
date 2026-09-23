@@ -5,15 +5,15 @@ tools. Works with any MCP client: Claude Code, Cursor, Windsurf, Cline, Codex.
 
 ## Tools
 
-| Tool | Backing core call | Purpose |
-| --- | --- | --- |
-| `jev_ask` | `askJev` | Batch of typed noul / choice / score questions, returns raw `JevResponse` |
-| `jev_models` | `listJevModels` | List models for the configured key |
-| `jev_route_skills` | `routeSkill` | Route a task to the best skill (or none) |
-| `jev_pick_tool` | `pickTool` | Pick the best tool + confirm-required flag |
-| `jev_judge_destructive` | `judgeDestructive` | Destructiveness judgment for a tool call |
-| `jev_browse_action` | `chooseBrowserAction` | Next browser operation from a page snapshot |
-| `jev_rank` | `rankCandidates` | Rank candidate strings best-first |
+| Tool                    | Backing core call     | Purpose                                                                   |
+| ----------------------- | --------------------- | ------------------------------------------------------------------------- |
+| `jev_ask`               | `askJev`              | Batch of typed noul / choice / score questions, returns raw `JevResponse` |
+| `jev_models`            | `listJevModels`       | List models for the configured key                                        |
+| `jev_route_skills`      | `routeSkill`          | Route a task to the best skill (or none)                                  |
+| `jev_pick_tool`         | `pickTool`            | Pick the best tool + confirm-required flag                                |
+| `jev_judge_destructive` | `judgeDestructive`    | Destructiveness judgment for a tool call                                  |
+| `jev_browse_action`     | `chooseBrowserAction` | Next browser operation from a page snapshot                               |
+| `jev_rank`              | `rankCandidates`      | Rank candidate strings best-first                                         |
 
 Every handler catches all errors and returns `isError: true` with a readable
 message — the server never dies because Jev is down (fail-open transport).

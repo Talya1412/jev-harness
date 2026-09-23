@@ -99,13 +99,22 @@ export function createDecisionLog(opts: DecisionLogOptions = {}): DecisionLog {
         if (same) agreed++;
         else disagreements.push({ digest: mine.digest, kind: mine.kind, a: mine, b: theirs });
       }
-      return { matched, agreed, flipRate: matched === 0 ? 0 : disagreements.length / matched, disagreements };
+      return {
+        matched,
+        agreed,
+        flipRate: matched === 0 ? 0 : disagreements.length / matched,
+        disagreements,
+      };
     },
   };
 }
 
 /** Stable digest for (kind, state, question ids). */
-export function decisionDigest(kind: string, state: unknown, questionIds: readonly string[]): string {
+export function decisionDigest(
+  kind: string,
+  state: unknown,
+  questionIds: readonly string[],
+): string {
   let canon: string;
   try {
     canon = stableStringify(state);

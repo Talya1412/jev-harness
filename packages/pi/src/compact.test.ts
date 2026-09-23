@@ -38,13 +38,17 @@ describe("resolveJevConfig", () => {
         TYPESAFE_BASE_URL: "https://x.test",
         TYPESAFE_DEFAULT_MODEL: "m",
         JEV_TIMEOUT_MS: "2500",
-      })
+      }),
     ).toEqual({ apiKey: "k", baseUrl: "https://x.test", model: "m", timeoutMs: 2500 });
   });
 
   it("ignores a non-positive or unparseable timeout", () => {
-    expect(resolveJevConfig({ TYPESAFE_API_KEY: "k", JEV_TIMEOUT_MS: "0" }).timeoutMs).toBeUndefined();
-    expect(resolveJevConfig({ TYPESAFE_API_KEY: "k", JEV_TIMEOUT_MS: "soon" }).timeoutMs).toBeUndefined();
+    expect(
+      resolveJevConfig({ TYPESAFE_API_KEY: "k", JEV_TIMEOUT_MS: "0" }).timeoutMs,
+    ).toBeUndefined();
+    expect(
+      resolveJevConfig({ TYPESAFE_API_KEY: "k", JEV_TIMEOUT_MS: "soon" }).timeoutMs,
+    ).toBeUndefined();
   });
 });
 
@@ -69,7 +73,12 @@ describe("truncate", () => {
 describe("blockText", () => {
   it("reads a plain string and joins text blocks", () => {
     expect(blockText("plain")).toBe("plain");
-    expect(blockText([{ type: "text", text: "a" }, { type: "text", text: "b" }])).toBe("a\nb");
+    expect(
+      blockText([
+        { type: "text", text: "a" },
+        { type: "text", text: "b" },
+      ]),
+    ).toBe("a\nb");
   });
 
   it("ignores non-text and malformed blocks instead of throwing", () => {

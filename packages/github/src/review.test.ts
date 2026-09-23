@@ -23,7 +23,7 @@ function reviewStub(map: Record<string, any>, opts: { failBest?: boolean } = {})
   return { fetchImpl };
 }
 
-const cfg = (fetchImpl: typeof fetch) => ({ apiKey: "k", fetchImpl, maxAttempts: 1 } as any);
+const cfg = (fetchImpl: typeof fetch) => ({ apiKey: "k", fetchImpl, maxAttempts: 1 }) as any;
 
 describe("runReview", () => {
   it("reports a destructive, critical PR that needs a security reviewer", async () => {
@@ -77,7 +77,8 @@ describe("runReview", () => {
   });
 
   it("does not throw on a total failure — still builds a comment", async () => {
-    const fetchImpl = (async () => new Response("boom", { status: 500 })) as unknown as typeof fetch;
+    const fetchImpl = (async () =>
+      new Response("boom", { status: 500 })) as unknown as typeof fetch;
     const r = await runReview(cfg(fetchImpl), { title: "x", body: "", diff: "d" });
     expect(r.degraded).toBe(true);
     expect(r.decisions.destructive).toBeNull();

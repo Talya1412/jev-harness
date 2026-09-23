@@ -50,7 +50,11 @@ function appendSummary(text: string): void {
   if (file) appendFileSync(file, text + "\n");
 }
 
-export async function githubFetch(path: string, init: RequestInit = {}, accept?: string): Promise<Response> {
+export async function githubFetch(
+  path: string,
+  init: RequestInit = {},
+  accept?: string,
+): Promise<Response> {
   const base = env("GITHUB_API_URL") || "https://api.github.com";
   const headers: Record<string, string> = {
     Authorization: `Bearer ${env("INPUT_GITHUB_TOKEN") || env("GITHUB_TOKEN")}`,
@@ -85,7 +89,11 @@ async function run(): Promise<void> {
     return;
   }
 
-  const diffRes = await githubFetch(`/repos/${pr.repo}/pulls/${pr.number}`, {}, "application/vnd.github.diff");
+  const diffRes = await githubFetch(
+    `/repos/${pr.repo}/pulls/${pr.number}`,
+    {},
+    "application/vnd.github.diff",
+  );
   if (!diffRes.ok) throw new Error(`fetching the PR diff failed: HTTP ${diffRes.status}`);
   const diff = (await diffRes.text()).slice(0, numInput("max_diff_chars", 60000));
 
@@ -125,7 +133,8 @@ async function run(): Promise<void> {
   const risk = score(response, "risk").score;
   const destructiveThreshold = numInput("destructive_threshold", 0.75);
   const secretThreshold = numInput("secret_threshold", 0.6);
-  const verdict = destructive >= destructiveThreshold || secretLeakP >= secretThreshold ? "block" : "pass";
+  const verdict =
+    destructive >= destructiveThreshold || secretLeakP >= secretThreshold ? "block" : "pass";
 
   setOutput("destructive", destructive.toFixed(3));
   setOutput("secret_leak", secretLeakP.toFixed(3));

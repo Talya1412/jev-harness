@@ -10,7 +10,9 @@ const roster = [
 
 describe("lexicalScores", () => {
   it("scores a long name part above a short one", () => {
-    const [modding] = lexicalScores("fh6 modding question", roster).filter((s) => s.name === "fh6-modding");
+    const [modding] = lexicalScores("fh6 modding question", roster).filter(
+      (s) => s.name === "fh6-modding",
+    );
     // "modding" (>3 chars) is worth 2; "fh6" (<=4 chars) is worth 1.
     expect(modding!.score).toBe(3);
   });

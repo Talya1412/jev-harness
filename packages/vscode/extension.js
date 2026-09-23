@@ -15,7 +15,13 @@
  * throw — advisory, never blocking.
  */
 const vscode = require("vscode");
-const { JevError, judgeDestructive, verifyClaim, DEFAULT_BASE_URL, DEFAULT_MODEL } = require("./jev");
+const {
+  JevError,
+  judgeDestructive,
+  verifyClaim,
+  DEFAULT_BASE_URL,
+  DEFAULT_MODEL,
+} = require("./jev");
 
 /** @type {import("./jev").JevConfig} */
 function cfg() {
@@ -31,12 +37,18 @@ function cfg() {
 function activate(context) {
   const review = vscode.commands.registerCommand("jev-harness.review", async () => {
     const editor = vscode.window.activeTextEditor;
-    if (!editor) { vscode.window.showInformationMessage("jev: open a file to review."); return; }
+    if (!editor) {
+      vscode.window.showInformationMessage("jev: open a file to review.");
+      return;
+    }
     const doc = editor.document;
     const config = cfg();
     const content = doc.getText().slice(0, 8000);
     const call = { tool: doc.fileName, input: { content } };
-    if (!config.apiKey) { showWebview(context, "jev: review", reviewHtmlNoKey()); return; }
+    if (!config.apiKey) {
+      showWebview(context, "jev: review", reviewHtmlNoKey());
+      return;
+    }
     try {
       const r = await judgeDestructive(config, call, { threshold: config.threshold });
       showWebview(context, "jev: review", reviewHtml(r, config.threshold, doc.fileName));
@@ -47,13 +59,22 @@ function activate(context) {
 
   const verify = vscode.commands.registerCommand("jev-harness.verify", async () => {
     const editor = vscode.window.activeTextEditor;
-    if (!editor) { vscode.window.showInformationMessage("jev: open a file and select a claim."); return; }
+    if (!editor) {
+      vscode.window.showInformationMessage("jev: open a file and select a claim.");
+      return;
+    }
     const config = cfg();
     const sel = editor.selection;
     const claim = sel.isEmpty ? "" : editor.document.getText(sel);
-    if (!claim) { vscode.window.showInformationMessage("jev: select a claim to verify."); return; }
+    if (!claim) {
+      vscode.window.showInformationMessage("jev: select a claim to verify.");
+      return;
+    }
     const source = editor.document.getText().slice(0, 8000);
-    if (!config.apiKey) { showWebview(context, "jev: verify", reviewHtmlNoKey("verify")); return; }
+    if (!config.apiKey) {
+      showWebview(context, "jev: verify", reviewHtmlNoKey("verify"));
+      return;
+    }
     try {
       const r = await verifyClaim(config, { claim, source });
       showWebview(context, "jev: verify", verifyHtml(r));
@@ -70,7 +91,9 @@ function deactivate() {}
 // --- webview html ---
 
 function showWebview(context, title, html) {
-  const panel = vscode.window.createWebviewPanel("jev-harness", title, vscode.ViewColumn.Beside, { enableScripts: true });
+  const panel = vscode.window.createWebviewPanel("jev-harness", title, vscode.ViewColumn.Beside, {
+    enableScripts: true,
+  });
   panel.webview.html = html;
 }
 
@@ -125,6 +148,11 @@ function errorHtml(e) {
   </body></html>`;
 }
 
-function esc(s) { return String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+function esc(s) {
+  return String(s == null ? "" : s).replace(
+    /[&<>]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c],
+  );
+}
 
 module.exports = { activate, deactivate, cfg };

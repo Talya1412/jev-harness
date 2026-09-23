@@ -70,14 +70,20 @@ export interface EvalReport {
   errors: Array<{ id: string; message: string }>;
 }
 
-export async function runEval(config: JevConfig, dataset: EvalDataset, opts: EvalOptions = {}): Promise<EvalReport> {
+export async function runEval(
+  config: JevConfig,
+  dataset: EvalDataset,
+  opts: EvalOptions = {},
+): Promise<EvalReport> {
   if (!dataset.questions || Object.keys(dataset.questions).length === 0) {
-    throw new Error("dataset has no questions — add a \"questions\" map or pass --questions");
+    throw new Error('dataset has no questions — add a "questions" map or pass --questions');
   }
 
   const concurrency = Math.max(1, opts.concurrency ?? 4);
   const cases = dataset.cases;
-  const results: Array<{ ok: boolean; response?: JevResponse; error?: string }> = new Array(cases.length);
+  const results: Array<{ ok: boolean; response?: JevResponse; error?: string }> = new Array(
+    cases.length,
+  );
 
   // An aborted run must not masquerade as N case errors with a full report.
   if (opts.signal?.aborted) {
@@ -94,13 +100,18 @@ export async function runEval(config: JevConfig, dataset: EvalDataset, opts: Eva
       const index = cursor++;
       const kase = cases[index]!;
       try {
-        results[index] = { ok: true, response: await askJev(config, kase.state, dataset.questions, opts.signal) };
+        results[index] = {
+          ok: true,
+          response: await askJev(config, kase.state, dataset.questions, opts.signal),
+        };
       } catch (err) {
         results[index] = { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(cases.length, 1)) }, worker));
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, Math.max(cases.length, 1)) }, worker),
+  );
   if (aborted || opts.signal?.aborted) {
     throw new Error("eval run aborted");
   }

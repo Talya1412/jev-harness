@@ -69,7 +69,10 @@ var BUILTIN_REDACT_PATTERNS = [
 ];
 function redactText(text, opts = {}) {
   let out = text;
-  const patterns = opts.extra?.length ? [...BUILTIN_REDACT_PATTERNS, ...opts.extra.map((p) => ({ label: "custom", pattern: p }))] : BUILTIN_REDACT_PATTERNS;
+  const patterns = opts.extra?.length ? [
+    ...BUILTIN_REDACT_PATTERNS,
+    ...opts.extra.map((p) => ({ label: "custom", pattern: p }))
+  ] : BUILTIN_REDACT_PATTERNS;
   for (const { label, pattern, replace } of patterns) {
     out = out.replace(pattern, replace ?? `${PLACEHOLDER}:${label}]`);
   }
@@ -97,7 +100,10 @@ function walk(value, depth, opts) {
     return redactText(value.toISOString(), opts);
   }
   if (value instanceof Map) {
-    return Array.from(value.entries(), ([k, v]) => [walk(k, depth + 1, opts), walk(v, depth + 1, opts)]);
+    return Array.from(value.entries(), ([k, v]) => [
+      walk(k, depth + 1, opts),
+      walk(v, depth + 1, opts)
+    ]);
   }
   if (value instanceof Set) {
     return Array.from(value, (v) => walk(v, depth + 1, opts));
@@ -145,7 +151,9 @@ function validateQuestions(questions) {
     if (!q || typeof q !== "object")
       throw new JevError(`question "${key}" must be an object`, { retryable: false });
     if (!q.instructions || typeof q.instructions !== "string") {
-      throw new JevError(`question "${key}" needs a non-empty instructions string`, { retryable: false });
+      throw new JevError(`question "${key}" needs a non-empty instructions string`, {
+        retryable: false
+      });
     }
     if (q.type === "choice") {
       const n = Object.keys(q.criteria ?? {}).length;
@@ -156,7 +164,9 @@ function validateQuestions(questions) {
       if (n < 2)
         throw new JevError(`score "${key}" needs at least 2 ordered levels`, { retryable: false });
     } else if (q.type !== "noul") {
-      throw new JevError(`question "${key}" has unknown type "${q.type}"`, { retryable: false });
+      throw new JevError(`question "${key}" has unknown type "${q.type}"`, {
+        retryable: false
+      });
     }
   }
 }
@@ -196,7 +206,10 @@ async function askJev(config, state, questions, signal) {
       });
       if (res.status === 429 || res.status >= 500) {
         const text = await res.text().catch(() => "");
-        lastError = new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 300)}`, { status: res.status, retryable: true });
+        lastError = new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 300)}`, {
+          status: res.status,
+          retryable: true
+        });
         if (attempt < cfg.maxAttempts) {
           cfg.onRetry?.(attempt, lastError);
           await sleep(250 * attempt * attempt);
@@ -206,7 +219,10 @@ async function askJev(config, state, questions, signal) {
       }
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 500)}`, { status: res.status, retryable: false });
+        throw new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 500)}`, {
+          status: res.status,
+          retryable: false
+        });
       }
       let parsed;
       const raw = await res.text();
@@ -325,17 +341,27 @@ async function triageUrgency(config, input, options = {}) {
 var DEFAULT_REVIEWERS = [
   { name: "auto", description: "No human review needed; trivial or well-tested change." },
   { name: "peer", description: "Normal code review by a teammate." },
-  { name: "security", description: "Security review: touches auth, crypto, secrets, or untrusted input." },
-  { name: "perf", description: "Performance review: hot path, allocation, or scaling-sensitive change." }
+  {
+    name: "security",
+    description: "Security review: touches auth, crypto, secrets, or untrusted input."
+  },
+  {
+    name: "perf",
+    description: "Performance review: hot path, allocation, or scaling-sensitive change."
+  }
 ];
 async function runReview(config, input, signal) {
   const reviewers = input.reviewers && input.reviewers.length > 0 ? input.reviewers : DEFAULT_REVIEWERS;
   const message = (input.title + "\n\n" + input.body).slice(0, 3e3);
   const [destructive, urgency, reviewer] = await Promise.allSettled([
-    judgeDestructive(config, { tool: "git-diff", input: { diff: input.diff }, cwd: input.cwd }, {
-      threshold: input.destructiveThreshold,
-      signal
-    }),
+    judgeDestructive(
+      config,
+      { tool: "git-diff", input: { diff: input.diff }, cwd: input.cwd },
+      {
+        threshold: input.destructiveThreshold,
+        signal
+      }
+    ),
     triageUrgency(config, { title: input.title, body: input.body }, { signal }),
     routeSkill(config, message, reviewers, { minConfidence: 0.4, signal })
   ]);
@@ -346,8 +372,15 @@ async function runReview(config, input, signal) {
   };
   const failures = [destructive, urgency, reviewer].filter((r) => r.status === "rejected");
   const degraded = failures.length > 0;
-  const error = failures.length > 0 ? failures.map((r, i) => "decision " + i + ": " + (r.reason instanceof Error ? r.reason.message : String(r.reason))).join("; ") : void 0;
-  return { decisions, comment: buildReviewComment({ decisions, title: input.title, degraded, error }), degraded, error };
+  const error = failures.length > 0 ? failures.map(
+    (r, i) => "decision " + i + ": " + (r.reason instanceof Error ? r.reason.message : String(r.reason))
+  ).join("; ") : void 0;
+  return {
+    decisions,
+    comment: buildReviewComment({ decisions, title: input.title, degraded, error }),
+    degraded,
+    error
+  };
 }
 function buildReviewComment(input) {
   const { decisions, title, degraded, error } = input;
@@ -361,9 +394,7 @@ function buildReviewComment(input) {
   ];
   if (decisions.destructive) {
     const flag = decisions.destructive.blocked ? "BLOCKED" : "ok";
-    lines.push(
-      `| destructive | ${flag} (p=${decisions.destructive.probability.toFixed(2)}) |`
-    );
+    lines.push(`| destructive | ${flag} (p=${decisions.destructive.probability.toFixed(2)}) |`);
   } else {
     lines.push("| destructive | _unavailable_ |");
   }
@@ -374,9 +405,7 @@ function buildReviewComment(input) {
   }
   if (decisions.reviewer) {
     const who = decisions.reviewer.reviewer ?? "none (low confidence)";
-    lines.push(
-      `| reviewer | ${who} (conf=${decisions.reviewer.confidence.toFixed(2)}) |`
-    );
+    lines.push(`| reviewer | ${who} (conf=${decisions.reviewer.confidence.toFixed(2)}) |`);
   } else {
     lines.push("| reviewer | _unavailable_ |");
   }
@@ -475,6 +504,8 @@ async function main() {
   return 0;
 }
 main().then((code) => process.exit(code)).catch((err) => {
-  process.stderr.write("jev-review failed: " + (err instanceof Error ? err.message : String(err)) + "\n");
+  process.stderr.write(
+    "jev-review failed: " + (err instanceof Error ? err.message : String(err)) + "\n"
+  );
   process.exit(0);
 });

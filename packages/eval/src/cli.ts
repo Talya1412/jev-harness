@@ -68,18 +68,42 @@ function parseArgs(argv: string[]): CliArgs {
     const flag = argv[i];
     const next = () => argv[++i];
     switch (flag) {
-      case "--dataset": args.dataset = next(); break;
-      case "--questions": args.questions = next(); break;
-      case "--out": args.out = next(); break;
-      case "--model": args.model = next(); break;
-      case "--base-url": args.baseUrl = next(); break;
-      case "--timeout-ms": args.timeoutMs = Number(next()); break;
-      case "--concurrency": args.concurrency = Number(next()); break;
-      case "--sweep-steps": args.sweepSteps = Number(next()); break;
-      case "--no-sweep": args.noSweep = true; break;
-      case "--no-fail": args.noFail = true; break;
-      case "-h": case "--help": args.help = true; break;
-      default: throw new Error(`unknown flag: ${flag} (see --help)`);
+      case "--dataset":
+        args.dataset = next();
+        break;
+      case "--questions":
+        args.questions = next();
+        break;
+      case "--out":
+        args.out = next();
+        break;
+      case "--model":
+        args.model = next();
+        break;
+      case "--base-url":
+        args.baseUrl = next();
+        break;
+      case "--timeout-ms":
+        args.timeoutMs = Number(next());
+        break;
+      case "--concurrency":
+        args.concurrency = Number(next());
+        break;
+      case "--sweep-steps":
+        args.sweepSteps = Number(next());
+        break;
+      case "--no-sweep":
+        args.noSweep = true;
+        break;
+      case "--no-fail":
+        args.noFail = true;
+        break;
+      case "-h":
+      case "--help":
+        args.help = true;
+        break;
+      default:
+        throw new Error(`unknown flag: ${flag} (see --help)`);
     }
   }
   return args;

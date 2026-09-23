@@ -2,8 +2,8 @@
 
 Evaluation and calibration toolkit for **[TypeSafe Jev](https://typesafe.ai)** —
 the System One decision model. The README of `@jev-harness/core` says it
-plainly: *calibration is not correctness, so validate on your own labeled
-data*. This package is the tooling for that validation: run a labeled
+plainly: _calibration is not correctness, so validate on your own labeled
+data_. This package is the tooling for that validation: run a labeled
 dataset through your questions and get accuracy, calibration, and a
 recommended threshold per question.
 
@@ -48,8 +48,14 @@ touches_auth (noul, 24 scored)
 
 ```json
 {
-  "questions": { "risk": { "type": "score", "instructions": "Risk level", "criteria": ["None", "Low", "Moderate", "High", "Critical"] } },
-  "cases": [ { "id": "c1", "state": { "diff": "..." }, "label": { "risk": "High" } } ]
+  "questions": {
+    "risk": {
+      "type": "score",
+      "instructions": "Risk level",
+      "criteria": ["None", "Low", "Moderate", "High", "Critical"]
+    }
+  },
+  "cases": [{ "id": "c1", "state": { "diff": "..." }, "label": { "risk": "High" } }]
 }
 ```
 
@@ -57,23 +63,23 @@ A bare array of cases works too — pair it with `--questions questions.json`.
 
 **Labels** are plain values, coerced per question type:
 
-| Type | Accepts |
-|---|---|
-| `noul` | `true`/`false`, `"yes"`/`"no"`, `0`/`1` |
-| `choice` | the criteria key as a string |
-| `score` | the level name, or its 0-based index |
+| Type     | Accepts                                 |
+| -------- | --------------------------------------- |
+| `noul`   | `true`/`false`, `"yes"`/`"no"`, `0`/`1` |
+| `choice` | the criteria key as a string            |
+| `score`  | the level name, or its 0-based index    |
 
 Cases with a missing or non-coercible label are skipped (counted, not fatal).
 
 ## What you get per question
 
-| Type | Metrics |
-|---|---|
-| `noul` | accuracy, precision, recall, F1 at your threshold, Brier, rank AUC, ECE, reliability diagram, and a **threshold sweep** with the max-F1 (Youden tiebreak) recommendation |
-| `choice` | top-1 accuracy, multiclass Brier, calibration of `confidence` against being right |
-| `score` | MAE in level units, within-1 rate, Pearson correlation with the label |
+| Type     | Metrics                                                                                                                                                                  |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `noul`   | accuracy, precision, recall, F1 at your threshold, Brier, rank AUC, ECE, reliability diagram, and a **threshold sweep** with the max-F1 (Youden tiebreak) recommendation |
+| `choice` | top-1 accuracy, multiclass Brier, calibration of `confidence` against being right                                                                                        |
+| `score`  | MAE in level units, within-1 rate, Pearson correlation with the label                                                                                                    |
 
-The suggested threshold is a starting point from *your* data — keep final
+The suggested threshold is a starting point from _your_ data — keep final
 thresholds and side effects in your code, and prefer a threshold that
 matches the cost asymmetry of your workflow (a destructive-gate veto and a
 skill hint should not share one).
@@ -84,24 +90,26 @@ skill hint should not share one).
 import { loadDataset, runEval, formatReport } from "@jev-harness/eval";
 
 const dataset = loadDataset("cases.jsonl");
-const report = await runEval({ apiKey: process.env.TYPESAFE_API_KEY! }, dataset, { concurrency: 4 });
+const report = await runEval({ apiKey: process.env.TYPESAFE_API_KEY! }, dataset, {
+  concurrency: 4,
+});
 console.log(formatReport(report));
 ```
 
 ## CLI options
 
-| Flag | Default | Purpose |
-|---|---|---|
-| `--dataset <path>` | (required) | JSON or JSONL dataset |
-| `--questions <path>` | — | Question map JSON, merged under per-line questions |
-| `--out <path>` | — | Also write the full report as JSON |
-| `--model <name>` | `jev-latest` | Pin the model under test |
-| `--base-url <url>` | `https://api.typesafe.ai` | API override |
-| `--timeout-ms <n>` | `15000` | Per-request timeout |
-| `--concurrency <n>` | `4` | Cases in flight |
-| `--no-sweep` | off | Skip the noul threshold sweep |
-| `--no-fail` | off | Exit 0 even when cases failed (exploratory runs) |
-| `--sweep-steps <n>` | `20` | Sweep resolution |
+| Flag                 | Default                   | Purpose                                            |
+| -------------------- | ------------------------- | -------------------------------------------------- |
+| `--dataset <path>`   | (required)                | JSON or JSONL dataset                              |
+| `--questions <path>` | —                         | Question map JSON, merged under per-line questions |
+| `--out <path>`       | —                         | Also write the full report as JSON                 |
+| `--model <name>`     | `jev-latest`              | Pin the model under test                           |
+| `--base-url <url>`   | `https://api.typesafe.ai` | API override                                       |
+| `--timeout-ms <n>`   | `15000`                   | Per-request timeout                                |
+| `--concurrency <n>`  | `4`                       | Cases in flight                                    |
+| `--no-sweep`         | off                       | Skip the noul threshold sweep                      |
+| `--no-fail`          | off                       | Exit 0 even when cases failed (exploratory runs)   |
+| `--sweep-steps <n>`  | `20`                      | Sweep resolution                                   |
 
 Failing cases never abort the run: they are listed in the report. The CLI
 exits 0 when every case passed, 1 when cases failed (`--no-fail` opts out

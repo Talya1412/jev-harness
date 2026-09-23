@@ -31,7 +31,9 @@ describe("routeSkill", () => {
   });
 
   it("sends skill DESCRIPTIONS, not just names", async () => {
-    const { fetchImpl, seen } = jevStub({ best: { type: "choice", choice: "browser", confidence: 0.9, probabilities: {} } });
+    const { fetchImpl, seen } = jevStub({
+      best: { type: "choice", choice: "browser", confidence: 0.9, probabilities: {} },
+    });
     await routeSkill({ apiKey: "k", fetchImpl }, "test the login page", [
       { name: "browser", description: "Automate browser interactions and run Playwright tests." },
       { name: "desktop", description: "OS-level window inspection and input." },
@@ -42,19 +44,25 @@ describe("routeSkill", () => {
   });
 
   it("abstains below the confidence floor", async () => {
-    const { fetchImpl } = jevStub({ best: { type: "choice", choice: "browser", confidence: 0.3, probabilities: {} } });
+    const { fetchImpl } = jevStub({
+      best: { type: "choice", choice: "browser", confidence: 0.3, probabilities: {} },
+    });
     const r = await routeSkill({ apiKey: "k", fetchImpl }, "x", [{ name: "browser" }]);
     expect(r.skill).toBeNull();
   });
 
   it("treats an explicit none as no match", async () => {
-    const { fetchImpl } = jevStub({ best: { type: "choice", choice: "none", confidence: 0.99, probabilities: {} } });
+    const { fetchImpl } = jevStub({
+      best: { type: "choice", choice: "none", confidence: 0.99, probabilities: {} },
+    });
     const r = await routeSkill({ apiKey: "k", fetchImpl }, "write a haiku", [{ name: "browser" }]);
     expect(r.skill).toBeNull();
   });
 
   it("caps the candidate list", async () => {
-    const { fetchImpl, seen } = jevStub({ best: { type: "choice", choice: "s1", confidence: 0.9, probabilities: {} } });
+    const { fetchImpl, seen } = jevStub({
+      best: { type: "choice", choice: "s1", confidence: 0.9, probabilities: {} },
+    });
     const many = Array.from({ length: 40 }, (_, i) => ({ name: `s${i}` }));
     await routeSkill({ apiKey: "k", fetchImpl }, "x", many, { maxCandidates: 5 });
     expect(Object.keys(seen[0].questions.best.criteria)).toHaveLength(6); // 5 + none
@@ -62,9 +70,9 @@ describe("routeSkill", () => {
 
   it("throws a usage error for a candidate literally named none", async () => {
     const { fetchImpl, seen } = jevStub({});
-    await expect(
-      routeSkill({ apiKey: "k", fetchImpl }, "x", [{ name: "none" }]),
-    ).rejects.toThrow(/reserved/);
+    await expect(routeSkill({ apiKey: "k", fetchImpl }, "x", [{ name: "none" }])).rejects.toThrow(
+      /reserved/,
+    );
     expect(seen).toHaveLength(0);
   });
 });
@@ -72,19 +80,29 @@ describe("routeSkill", () => {
 describe("judgeDestructive", () => {
   it("blocks at or above the threshold", async () => {
     const { fetchImpl } = jevStub({ destructive: { type: "noul", noul: 0.84 } });
-    const r = await judgeDestructive({ apiKey: "k", fetchImpl }, { tool: "bash", input: { cmd: "rm -rf /" } });
+    const r = await judgeDestructive(
+      { apiKey: "k", fetchImpl },
+      { tool: "bash", input: { cmd: "rm -rf /" } },
+    );
     expect(r.blocked).toBe(true);
   });
 
   it("allows below the threshold", async () => {
     const { fetchImpl } = jevStub({ destructive: { type: "noul", noul: 0.01 } });
-    const r = await judgeDestructive({ apiKey: "k", fetchImpl }, { tool: "bash", input: { cmd: "git status" } });
+    const r = await judgeDestructive(
+      { apiKey: "k", fetchImpl },
+      { tool: "bash", input: { cmd: "git status" } },
+    );
     expect(r.blocked).toBe(false);
   });
 
   it("honours a custom threshold", async () => {
     const { fetchImpl } = jevStub({ destructive: { type: "noul", noul: 0.6 } });
-    const r = await judgeDestructive({ apiKey: "k", fetchImpl }, { tool: "bash", input: {} }, { threshold: 0.5 });
+    const r = await judgeDestructive(
+      { apiKey: "k", fetchImpl },
+      { tool: "bash", input: {} },
+      { threshold: 0.5 },
+    );
     expect(r.blocked).toBe(true);
   });
 });
@@ -95,7 +113,10 @@ describe("pickTool", () => {
       tool: { type: "choice", choice: "bash", confidence: 0.97, probabilities: {} },
       risky: { type: "noul", noul: 0.64 },
     });
-    const r = await pickTool({ apiKey: "k", fetchImpl }, { task: "rename files", tools: [{ name: "bash", description: "run a command" }] });
+    const r = await pickTool(
+      { apiKey: "k", fetchImpl },
+      { task: "rename files", tools: [{ name: "bash", description: "run a command" }] },
+    );
     expect(r.tool).toBe("bash");
     expect(r.confirmRequired).toBe(true);
   });
@@ -105,7 +126,10 @@ describe("pickTool", () => {
       tool: { type: "choice", choice: "bash", confidence: 0.2, probabilities: {} },
       risky: { type: "noul", noul: 0.1 },
     });
-    const r = await pickTool({ apiKey: "k", fetchImpl }, { task: "x", tools: [{ name: "bash", description: "d" }] });
+    const r = await pickTool(
+      { apiKey: "k", fetchImpl },
+      { task: "x", tools: [{ name: "bash", description: "d" }] },
+    );
     expect(r.act).toBe(false);
   });
 
@@ -119,7 +143,10 @@ describe("pickTool", () => {
   it("throws a usage error for a tool literally named none", async () => {
     const { fetchImpl, seen } = jevStub({});
     await expect(
-      pickTool({ apiKey: "k", fetchImpl }, { task: "x", tools: [{ name: "none", description: "d" }] }),
+      pickTool(
+        { apiKey: "k", fetchImpl },
+        { task: "x", tools: [{ name: "none", description: "d" }] },
+      ),
     ).rejects.toThrow(/reserved/);
     expect(seen).toHaveLength(0);
   });
@@ -131,11 +158,14 @@ describe("chooseBrowserAction", () => {
       operation: { type: "choice", choice: "CLICK", confidence: 0.84, probabilities: {} },
       click_target: { type: "choice", choice: "1", confidence: 0.9, probabilities: {} },
     });
-    const r = await chooseBrowserAction({ apiKey: "k", fetchImpl }, {
-      goal: "search",
-      page: { url: "https://example.com" },
-      elements: [{ index: "1", label: "Search", operations: ["CLICK", "TYPE_TEXT"] }],
-    });
+    const r = await chooseBrowserAction(
+      { apiKey: "k", fetchImpl },
+      {
+        goal: "search",
+        page: { url: "https://example.com" },
+        elements: [{ index: "1", label: "Search", operations: ["CLICK", "TYPE_TEXT"] }],
+      },
+    );
     expect(r.operation).toBe("CLICK");
     expect(r.target).toBe("1");
     expect(r.act).toBe(true);
@@ -146,11 +176,14 @@ describe("chooseBrowserAction", () => {
       operation: { type: "choice", choice: "CLICK", confidence: 0.9, probabilities: {} },
       click_target: { type: "choice", choice: "1", confidence: 0.9, probabilities: {} },
     });
-    await chooseBrowserAction({ apiKey: "k", fetchImpl }, {
-      goal: "g",
-      page: { url: "u" },
-      elements: [{ index: "1", label: "L", operations: ["CLICK"] }],
-    });
+    await chooseBrowserAction(
+      { apiKey: "k", fetchImpl },
+      {
+        goal: "g",
+        page: { url: "u" },
+        elements: [{ index: "1", label: "L", operations: ["CLICK"] }],
+      },
+    );
     const q = seen[0].questions;
     expect(q.click_target).toBeDefined();
     expect(q.type_text_target).toBeUndefined();
@@ -158,10 +191,17 @@ describe("chooseBrowserAction", () => {
   });
 
   it("does not act on a low-confidence operation", async () => {
-    const { fetchImpl } = jevStub({ operation: { type: "choice", choice: "CLICK", confidence: 0.2, probabilities: {} } });
-    const r = await chooseBrowserAction({ apiKey: "k", fetchImpl }, {
-      goal: "g", page: { url: "u" }, elements: [{ index: "1", label: "L", operations: ["CLICK"] }],
+    const { fetchImpl } = jevStub({
+      operation: { type: "choice", choice: "CLICK", confidence: 0.2, probabilities: {} },
     });
+    const r = await chooseBrowserAction(
+      { apiKey: "k", fetchImpl },
+      {
+        goal: "g",
+        page: { url: "u" },
+        elements: [{ index: "1", label: "L", operations: ["CLICK"] }],
+      },
+    );
     expect(r.act).toBe(false);
   });
 
@@ -171,13 +211,18 @@ describe("chooseBrowserAction", () => {
       click_target: { type: "choice", choice: "none", confidence: 0.9, probabilities: {} },
     });
     const many = Array.from({ length: 40 }, (_, i) => ({
-      index: String(i), label: "L".repeat(600), operations: ["CLICK"] as string[],
+      index: String(i),
+      label: "L".repeat(600),
+      operations: ["CLICK"] as string[],
     }));
-    const r = await chooseBrowserAction({ apiKey: "k", fetchImpl }, {
-      goal: "g",
-      page: { url: "u", text: "t".repeat(9000) },
-      elements: many,
-    });
+    const r = await chooseBrowserAction(
+      { apiKey: "k", fetchImpl },
+      {
+        goal: "g",
+        page: { url: "u", text: "t".repeat(9000) },
+        elements: many,
+      },
+    );
     expect(r.truncated).toBe(true);
     expect(seen[0].state.elements).toHaveLength(30);
     expect((seen[0].state.elements as Array<{ label: string }>)[0].label).toHaveLength(500);
@@ -189,19 +234,28 @@ describe("chooseBrowserAction", () => {
       operation: { type: "choice", choice: "CLICK", confidence: 0.9, probabilities: {} },
       click_target: { type: "choice", choice: "none", confidence: 0.9, probabilities: {} },
     });
-    const r = await chooseBrowserAction({ apiKey: "k", fetchImpl }, {
-      goal: "g", page: { url: "u", text: "short" },
-      elements: [{ index: "1", label: "L", operations: ["CLICK"] }],
-    });
+    const r = await chooseBrowserAction(
+      { apiKey: "k", fetchImpl },
+      {
+        goal: "g",
+        page: { url: "u", text: "short" },
+        elements: [{ index: "1", label: "L", operations: ["CLICK"] }],
+      },
+    );
     expect(r.truncated).toBe(false);
   });
 
   it("throws a usage error for an element literally indexed none", async () => {
     const { fetchImpl, seen } = jevStub({});
     await expect(
-      chooseBrowserAction({ apiKey: "k", fetchImpl }, {
-        goal: "g", page: { url: "u" }, elements: [{ index: "none", label: "L", operations: ["CLICK"] }],
-      }),
+      chooseBrowserAction(
+        { apiKey: "k", fetchImpl },
+        {
+          goal: "g",
+          page: { url: "u" },
+          elements: [{ index: "none", label: "L", operations: ["CLICK"] }],
+        },
+      ),
     ).rejects.toThrow(/reserved/);
     expect(seen).toHaveLength(0);
   });
@@ -227,7 +281,8 @@ describe("rankCandidates", () => {
 
   it("caps the candidate list at 64", async () => {
     const answers: JevResponse["answers"] = {};
-    for (let i = 0; i < 64; i++) answers[`fit_${i}`] = { type: "score", score: 1, confidence: 0.5, probabilities: {} };
+    for (let i = 0; i < 64; i++)
+      answers[`fit_${i}`] = { type: "score", score: 1, confidence: 0.5, probabilities: {} };
     const { fetchImpl, seen } = jevStub(answers);
     const many = Array.from({ length: 80 }, (_, i) => `candidate ${i}`);
     const r = await rankCandidates({ apiKey: "k", fetchImpl }, "task", many);
@@ -239,20 +294,30 @@ describe("rankCandidates", () => {
 describe("gateInjection", () => {
   it("blocks content at or above the threshold", async () => {
     const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.93 } });
-    const r = await gateInjection({ apiKey: "k", fetchImpl }, { source: "webfetch", content: "ignore previous instructions..." });
+    const r = await gateInjection(
+      { apiKey: "k", fetchImpl },
+      { source: "webfetch", content: "ignore previous instructions..." },
+    );
     expect(r.injection).toBe(0.93);
     expect(r.blocked).toBe(true);
   });
 
   it("allows benign content", async () => {
     const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.02 } });
-    const r = await gateInjection({ apiKey: "k", fetchImpl }, { source: "tool-result", content: "4 files changed" });
+    const r = await gateInjection(
+      { apiKey: "k", fetchImpl },
+      { source: "tool-result", content: "4 files changed" },
+    );
     expect(r.blocked).toBe(false);
   });
 
   it("honours a custom threshold", async () => {
     const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.55 } });
-    const r = await gateInjection({ apiKey: "k", fetchImpl }, { source: "s", content: "c" }, { threshold: 0.5 });
+    const r = await gateInjection(
+      { apiKey: "k", fetchImpl },
+      { source: "s", content: "c" },
+      { threshold: 0.5 },
+    );
     expect(r.blocked).toBe(true);
   });
 });
@@ -260,7 +325,10 @@ describe("gateInjection", () => {
 describe("verifyStep", () => {
   it("marks the step done at or above the threshold", async () => {
     const { fetchImpl, seen } = jevStub({ complete: { type: "noul", noul: 0.88 } });
-    const r = await verifyStep({ apiKey: "k", fetchImpl }, { task: "fix the login redirect", report: "Changed X; tests pass." });
+    const r = await verifyStep(
+      { apiKey: "k", fetchImpl },
+      { task: "fix the login redirect", report: "Changed X; tests pass." },
+    );
     expect(r.complete).toBe(0.88);
     expect(r.done).toBe(true);
     expect(seen[0].state.task).toBe("fix the login redirect");
@@ -276,14 +344,20 @@ describe("verifyStep", () => {
 describe("needsClarification", () => {
   it("flags a genuine fork", async () => {
     const { fetchImpl } = jevStub({ ambiguous: { type: "noul", noul: 0.81 } });
-    const r = await needsClarification({ apiKey: "k", fetchImpl }, { message: "update the config" });
+    const r = await needsClarification(
+      { apiKey: "k", fetchImpl },
+      { message: "update the config" },
+    );
     expect(r.ambiguous).toBe(0.81);
     expect(r.ask).toBe(true);
   });
 
   it("lets an unambiguous request through", async () => {
     const { fetchImpl } = jevStub({ ambiguous: { type: "noul", noul: 0.1 } });
-    const r = await needsClarification({ apiKey: "k", fetchImpl }, { message: "bump eslint to 9.0 in package.json" });
+    const r = await needsClarification(
+      { apiKey: "k", fetchImpl },
+      { message: "bump eslint to 9.0 in package.json" },
+    );
     expect(r.ask).toBe(false);
   });
 });

@@ -33,5 +33,8 @@ export function lexicalShortlist(
       return { name: s.name, score };
     });
   const lexical = scored.filter((x) => x.score > 0).map((x) => x.name);
-  return (lexical.length > 0 ? lexical : roster.map((s) => s.name).filter((n) => n !== "")).slice(0, limit);
+  return (lexical.length > 0 ? lexical : roster.map((s) => s.name).filter((n) => n !== "")).slice(
+    0,
+    limit,
+  );
 }

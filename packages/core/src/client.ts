@@ -40,21 +40,29 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 /** Validate the question map before spending a request. */
 export function validateQuestions(questions: Questions): void {
   const keys = Object.keys(questions ?? {});
-  if (keys.length === 0) throw new JevError("questions must be a non-empty object", { retryable: false });
+  if (keys.length === 0)
+    throw new JevError("questions must be a non-empty object", { retryable: false });
   for (const key of keys) {
     const q = questions[key];
-    if (!q || typeof q !== "object") throw new JevError(`question "${key}" must be an object`, { retryable: false });
+    if (!q || typeof q !== "object")
+      throw new JevError(`question "${key}" must be an object`, { retryable: false });
     if (!q.instructions || typeof q.instructions !== "string") {
-      throw new JevError(`question "${key}" needs a non-empty instructions string`, { retryable: false });
+      throw new JevError(`question "${key}" needs a non-empty instructions string`, {
+        retryable: false,
+      });
     }
     if (q.type === "choice") {
       const n = Object.keys(q.criteria ?? {}).length;
-      if (n < 2) throw new JevError(`choice "${key}" needs at least 2 criteria`, { retryable: false });
+      if (n < 2)
+        throw new JevError(`choice "${key}" needs at least 2 criteria`, { retryable: false });
     } else if (q.type === "score") {
       const n = Array.isArray(q.criteria) ? q.criteria.length : 0;
-      if (n < 2) throw new JevError(`score "${key}" needs at least 2 ordered levels`, { retryable: false });
+      if (n < 2)
+        throw new JevError(`score "${key}" needs at least 2 ordered levels`, { retryable: false });
     } else if (q.type !== "noul") {
-      throw new JevError(`question "${key}" has unknown type "${(q as { type?: string }).type}"`, { retryable: false });
+      throw new JevError(`question "${key}" has unknown type "${(q as { type?: string }).type}"`, {
+        retryable: false,
+      });
     }
   }
 }
@@ -112,7 +120,10 @@ export async function askJev(
 
       if (res.status === 429 || res.status >= 500) {
         const text = await res.text().catch(() => "");
-        lastError = new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 300)}`, { status: res.status, retryable: true });
+        lastError = new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 300)}`, {
+          status: res.status,
+          retryable: true,
+        });
         if (attempt < cfg.maxAttempts) {
           cfg.onRetry?.(attempt, lastError);
           await sleep(250 * attempt * attempt);
@@ -122,7 +133,10 @@ export async function askJev(
       }
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 500)}`, { status: res.status, retryable: false });
+        throw new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 500)}`, {
+          status: res.status,
+          retryable: false,
+        });
       }
 
       let parsed: unknown;
@@ -141,7 +155,8 @@ export async function askJev(
       const e = err instanceof Error ? err : new Error(String(err));
       if (e instanceof JevError && !e.retryable) throw e;
       lastError = e;
-      const transient = e.name === "AbortError" || /fetch failed|ECONN|network|timeout|aborted/i.test(e.message);
+      const transient =
+        e.name === "AbortError" || /fetch failed|ECONN|network|timeout|aborted/i.test(e.message);
       if (!transient || attempt === cfg.maxAttempts) throw e;
       cfg.onRetry?.(attempt, e);
       await sleep(250 * attempt * attempt);
@@ -202,13 +217,15 @@ export async function listJevModels(
         throw new JevError("Jev models returned malformed JSON", { retryable: false });
       }
       const models = (body as { models?: unknown })?.models;
-      if (!Array.isArray(models)) throw new JevError("Jev models response is missing `models`", { retryable: false });
+      if (!Array.isArray(models))
+        throw new JevError("Jev models response is missing `models`", { retryable: false });
       return models as Array<{ name: string; description?: string }>;
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       if (e instanceof JevError && !e.retryable) throw e;
       lastError = e;
-      const transient = e.name === "AbortError" || /fetch failed|ECONN|network|timeout|aborted/i.test(e.message);
+      const transient =
+        e.name === "AbortError" || /fetch failed|ECONN|network|timeout|aborted/i.test(e.message);
       if (!transient || attempt === cfg.maxAttempts) throw e;
       cfg.onRetry?.(attempt, e);
       await sleep(250 * attempt * attempt);
@@ -231,16 +248,24 @@ export function noul(response: JevResponse, id: string): number {
   return (a as NoulAnswer).noul;
 }
 
-export function choice(response: JevResponse, id: string): { choice: string; confidence: number; probabilities: Record<string, number> } {
+export function choice(
+  response: JevResponse,
+  id: string,
+): { choice: string; confidence: number; probabilities: Record<string, number> } {
   const a = response.answers[id];
-  if (!a || a.type !== "choice") throw new JevError(`answer "${id}" is not a valid choice`, { retryable: false });
+  if (!a || a.type !== "choice")
+    throw new JevError(`answer "${id}" is not a valid choice`, { retryable: false });
   const c = a as ChoiceAnswer;
   return { choice: c.choice, confidence: c.confidence ?? 0, probabilities: c.probabilities ?? {} };
 }
 
-export function score(response: JevResponse, id: string): { score: number; confidence: number; legend?: Record<string, string> } {
+export function score(
+  response: JevResponse,
+  id: string,
+): { score: number; confidence: number; legend?: Record<string, string> } {
   const a = response.answers[id];
-  if (!a || a.type !== "score") throw new JevError(`answer "${id}" is not a valid score`, { retryable: false });
+  if (!a || a.type !== "score")
+    throw new JevError(`answer "${id}" is not a valid score`, { retryable: false });
   const s = a as ScoreAnswer;
   return { score: s.score, confidence: s.confidence ?? 0, legend: s.legend };
 }

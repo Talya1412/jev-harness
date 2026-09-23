@@ -11,8 +11,16 @@ const SK_KEY = "sk-" + "proj4bc9d8ef2gh1ijklm3nop";
 
 describe("redactText", () => {
   it.each([
-    ["aws access key", "key AKIAIOSFODNN7EXAMPLE in config", "key [REDACTED:aws-access-key] in config"],
-    ["jwt", "auth eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U done", "auth [REDACTED:jwt] done"],
+    [
+      "aws access key",
+      "key AKIAIOSFODNN7EXAMPLE in config",
+      "key [REDACTED:aws-access-key] in config",
+    ],
+    [
+      "jwt",
+      "auth eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U done",
+      "auth [REDACTED:jwt] done",
+    ],
     [
       "private key",
       "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----",
@@ -21,12 +29,28 @@ describe("redactText", () => {
     ["github token", "token " + GITHUB_TOKEN, "token [REDACTED:github-token]"],
     ["slack token", SLACK_TOKEN, "[REDACTED:slack-token]"],
     ["sk api key", "openai " + SK_KEY, "openai [REDACTED:api-key]"],
-    ["bearer header", "Authorization: Bearer abcdef0123456789abcdef0123456789", "Authorization: Bearer [REDACTED]"],
+    [
+      "bearer header",
+      "Authorization: Bearer abcdef0123456789abcdef0123456789",
+      "Authorization: Bearer [REDACTED]",
+    ],
     ["env assignment", "TYPESAFE_API_KEY=sk-abc123 in .env", "TYPESAFE_API_KEY=[REDACTED] in .env"],
-    ["url credential", "https://host/db?password=hunter2&x=1", "https://host/db?password=[REDACTED]&x=1"],
-    ["connection string", "postgres://admin:s3cret@db.internal:5432/app", "[REDACTED-connstring]@db.internal:5432/app"],
+    [
+      "url credential",
+      "https://host/db?password=hunter2&x=1",
+      "https://host/db?password=[REDACTED]&x=1",
+    ],
+    [
+      "connection string",
+      "postgres://admin:s3cret@db.internal:5432/app",
+      "[REDACTED-connstring]@db.internal:5432/app",
+    ],
     ["email", "ping jane.doe+ops@example.co.uk today", "ping [REDACTED:email] today"],
-    ["google api key", "key AIza" + "SyB1a2c3d4e5f6g7h8i9j0k1l2m3n4o5p67", "key [REDACTED:google-api-key]"],
+    [
+      "google api key",
+      "key AIza" + "SyB1a2c3d4e5f6g7h8i9j0k1l2m3n4o5p67",
+      "key [REDACTED:google-api-key]",
+    ],
   ])("redacts %s", (_name, input, expected) => {
     expect(redactText(input)).toBe(expected);
   });
@@ -43,7 +67,9 @@ describe("redactText", () => {
   });
 
   it("applies extra patterns as [REDACTED:custom]", () => {
-    expect(redactText("acct 4111111111111111 ok", { extra: [/\b4\d{15}\b/g] })).toBe("acct [REDACTED:custom] ok");
+    expect(redactText("acct 4111111111111111 ok", { extra: [/\b4\d{15}\b/g] })).toBe(
+      "acct [REDACTED:custom] ok",
+    );
   });
 
   it("never returns the original secret when a pattern list is empty", () => {
@@ -75,8 +101,16 @@ describe("redactState", () => {
 
   it("preserves Date/Map/Set/class instances instead of corrupting them", () => {
     const date = new Date("2026-09-20T00:00:00.000Z");
-    const out = redactState({ d: date, m: new Map([["k", "v AKIAIOSFODNN7EXAMPLE"]]), s: new Set(["a@b.example"]), n: 1 }) as {
-      d: unknown; m: unknown; s: unknown; n: unknown;
+    const out = redactState({
+      d: date,
+      m: new Map([["k", "v AKIAIOSFODNN7EXAMPLE"]]),
+      s: new Set(["a@b.example"]),
+      n: 1,
+    }) as {
+      d: unknown;
+      m: unknown;
+      s: unknown;
+      n: unknown;
     };
     // Date keeps its ISO content (JSON.stringify semantics), Map/Set keep entries.
     expect(out.d).toBe("2026-09-20T00:00:00.000Z");
@@ -85,7 +119,12 @@ describe("redactState", () => {
     expect(out.n).toBe(1);
     // no-redact baseline really does serialize these shapes
     expect(JSON.parse(JSON.stringify({ d: date })).d).toBe("2026-09-20T00:00:00.000Z");
-    class Point { constructor(public x = 1) {} toString() { return "point(1)"; } }
+    class Point {
+      constructor(public x = 1) {}
+      toString() {
+        return "point(1)";
+      }
+    }
     expect(redactState({ p: new Point() })).toEqual({ p: "point(1)" });
   });
 
@@ -113,12 +152,19 @@ describe("askJev redaction", () => {
       ok: true,
       status: 200,
       text: async () =>
-        JSON.stringify({ model: "jev-test", answers: { q: { type: "noul", noul: 0.1 } } } satisfies JevResponse),
+        JSON.stringify({
+          model: "jev-test",
+          answers: { q: { type: "noul", noul: 0.1 } },
+        } satisfies JevResponse),
     } as unknown as Response;
   }) as typeof fetch;
 
   it("sends unredacted state by default", async () => {
-    await askJev({ apiKey: "k", fetchImpl }, { secret: "AKIAIOSFODNN7EXAMPLE" }, { q: { type: "noul", instructions: "ok?" } });
+    await askJev(
+      { apiKey: "k", fetchImpl },
+      { secret: "AKIAIOSFODNN7EXAMPLE" },
+      { q: { type: "noul", instructions: "ok?" } },
+    );
     expect(JSON.stringify(captured[0])).toContain("AKIAIOSFODNN7EXAMPLE");
   });
 

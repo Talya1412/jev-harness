@@ -15,8 +15,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    # Formatting and linting are platform-independent; one runner is enough.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      # Informational only: report vulnerable production deps without failing
+      # the build — Dependabot owns the remediation path.
+      - name: Dependency audit (informational)
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
+
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +55,7 @@ jobs:
 
   python:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
@@ -47,8 +68,9 @@ jobs:
   bundle-drift:
     # The committed bundles below are consumed directly (OMP loads
     # packages/omp/bundle; the Claude Code marketplace and the GitHub
-    # Action consume their dist/ dirs), so a stale bundle must fail CI.
+    # Actions consume their dist/ entrypoints), so a stale bundle must fail CI.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -60,4 +82,11 @@ jobs:
       # @jev-harness/core dist exists before the adapters bundle it.
       - run: npm run build
       - name: Fail on stale committed bundles
-        run: git diff --exit-code -- packages/omp/bundle packages/claude-code/dist packages/github/dist packages/claude-code/.claude-plugin
+        run: |-
+          git diff --exit-code -- \
+            packages/omp/bundle \
+            packages/claude-code/dist \
+            packages/claude-code/.claude-plugin \
+            packages/github/dist \
+            packages/pr-triage-action/dist/index.js \
+            packages/jev-gate-action/dist/index.js

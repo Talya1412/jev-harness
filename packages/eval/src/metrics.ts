@@ -32,7 +32,19 @@ export interface BinaryMetrics {
 export function binaryMetrics(pairs: BinaryPair[], threshold = 0.5): BinaryMetrics {
   const n = pairs.length;
   if (n === 0) {
-    return { n: 0, tp: 0, fp: 0, tn: 0, fn: 0, accuracy: 0, precision: null, recall: null, f1: null, brier: 0, auc: null };
+    return {
+      n: 0,
+      tp: 0,
+      fp: 0,
+      tn: 0,
+      fn: 0,
+      accuracy: 0,
+      precision: null,
+      recall: null,
+      f1: null,
+      brier: 0,
+      auc: null,
+    };
   }
   let tp = 0;
   let fp = 0;
@@ -53,7 +65,19 @@ export function binaryMetrics(pairs: BinaryPair[], threshold = 0.5): BinaryMetri
     precision !== null && recall !== null && precision + recall > 0
       ? (2 * precision * recall) / (precision + recall)
       : null;
-  return { n, tp, fp, tn, fn, accuracy: (tp + tn) / n, precision, recall, f1, brier: brier / n, auc: aucRank(pairs) };
+  return {
+    n,
+    tp,
+    fp,
+    tn,
+    fn,
+    accuracy: (tp + tn) / n,
+    precision,
+    recall,
+    f1,
+    brier: brier / n,
+    auc: aucRank(pairs),
+  };
 }
 
 /** AUC via average ranks with tie handling. */
@@ -151,7 +175,10 @@ export interface SweepRow {
  * the best F1 (ties broken by Youden's J). This is how "tuned threshold
  * 0.75" statements should be produced: from labeled data, not folklore.
  */
-export function thresholdSweep(pairs: BinaryPair[], opts: { steps?: number } = {}): { rows: SweepRow[]; best: SweepRow } {
+export function thresholdSweep(
+  pairs: BinaryPair[],
+  opts: { steps?: number } = {},
+): { rows: SweepRow[]; best: SweepRow } {
   const steps = Math.max(1, opts.steps ?? 20);
   const rows: SweepRow[] = [];
   for (let i = 0; i <= steps; i++) {
@@ -246,7 +273,15 @@ export function scoreMetrics(rows: ScoreRow[]): ScoreMetrics {
     mae += d;
     if (d <= 1 + 1e-9) within++;
   }
-  return { n, mae: mae / n, withinOne: within / n, pearson: pearsonCorr(rows.map((r) => r.score), rows.map((r) => r.truthIndex)) };
+  return {
+    n,
+    mae: mae / n,
+    withinOne: within / n,
+    pearson: pearsonCorr(
+      rows.map((r) => r.score),
+      rows.map((r) => r.truthIndex),
+    ),
+  };
 }
 
 export function pearsonCorr(xs: number[], ys: number[]): number | null {

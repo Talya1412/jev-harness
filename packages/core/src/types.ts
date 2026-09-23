@@ -88,7 +88,10 @@ export interface JevConfig {
 export class JevError extends Error {
   readonly status?: number;
   readonly retryable: boolean;
-  constructor(message: string, options: { status?: number; retryable?: boolean; cause?: unknown } = {}) {
+  constructor(
+    message: string,
+    options: { status?: number; retryable?: boolean; cause?: unknown } = {},
+  ) {
     super(message);
     this.name = "JevError";
     this.status = options.status;

@@ -4,6 +4,10 @@
   "description": "MCP server (stdio) exposing TypeSafe's Jev (System One) decision model as tools.",
   "type": "module",
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=20"
   },

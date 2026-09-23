@@ -59,13 +59,20 @@ it never emits prose. See @README.md for primitives and patterns.
   never log them.
 - Fail open: Jev errors must never block the agent — hooks catch and allow.
   Advisory output, except the destructive gate which is an explicit veto.
+- Lint + format with the repo's ESLint (flat config, type-agnostic) and
+  Prettier: `npm run lint`, `npm run format` (`npm run qa` runs the whole
+  gate). Shared compiler options live in `tsconfig.base.json`; each package
+  tsconfig only sets `rootDir` / `outDir` / `include` / `exclude`.
+- On a machine with `NODE_ENV=production`, npm omits dev dependencies — use
+  `npm install --include=dev` / `npm ci --include=dev` there. `.npmrc` sets
+  `engine-strict=true`.
 
 ## Architecture Notes
 
 - Root `npm run build` builds `@jev-harness/core` before all adapters —
   adapters resolve core from the workspace, so core must exist first.
-- Cross-workspace deps use `"*"` (claude-code pins `"^0.1.0"`); npm here
-  does not use `workspace:*` syntax.
+- Cross-workspace deps use `"*"` for every adapter; npm here does not use
+  `workspace:*` syntax.
 - Committed build output: `packages/omp/bundle/extension.js`,
   `packages/claude-code/dist/`, `packages/github/dist/`,
   `packages/pr-triage-action/dist/index.js`, and
@@ -75,12 +82,15 @@ it never emits prose. See @README.md for primitives and patterns.
   core/mcp/omp/pi/cli/eval/kit is gitignored. Rebuild + commit the bundle
   and committed dists whenever core or adapter sources change.
 - CI (@.github/workflows/ci.yml) runs on push to `[master, main]` +
-  PRs: matrix ubuntu/windows × node 20/22/24
-  (`npm ci` → build → typecheck → test) plus a python job running
-  `pytest packages/jev-py/tests` (includes the TS parity fixture).
-  Other workflows: live-eval.yml (manual calibration run vs baseline),
-  release.yml (changesets version PR + npm publish with provenance),
-  pr-triage.yml.
+  PRs: a `lint` job (`format:check` + `lint` + informational `npm audit`),
+  a matrix job ubuntu/windows × node 20/22/24
+  (`npm ci` → build → typecheck → test), a `python` job running
+  `pytest packages/jev-py/tests` (includes the TS parity fixture), and a
+  `bundle-drift` job that fails on stale committed artifacts. Every job sets
+  `timeout-minutes`. Other workflows: live-eval.yml (manual calibration run
+  vs baseline), release.yml (changesets version PR + npm publish with
+  provenance), pr-triage.yml. Dependabot (.github/dependabot.yml) covers
+  npm, GitHub Actions, and pip weekly.
 
 ## Common Workflows
 
@@ -89,10 +99,13 @@ npm install            # workspace install (root)
 npm run build          # core first, then all adapters (+ OMP bundle)
 npm run typecheck      # tsc --noEmit per workspace
 npm test               # vitest per workspace (--passWithNoTests outside core)
+npm run lint           # eslint .
+npm run format         # prettier --write .
+npm run qa             # build + typecheck + lint + format:check + test
 ```
 
 - Rebuild one adapter: `npm run build --workspace=@jev-harness/mcp`
   (core, mcp, claude-code, cli, pi) or `npm run bundle
-  --workspace=@jev-harness/omp` for the OMP bundle alone.
+--workspace=@jev-harness/omp` for the OMP bundle alone.
 - Test one package: `npm test --workspace=@jev-harness/core`.
 - Never commit `.env` (gitignored); `.env.example` is the committed template.

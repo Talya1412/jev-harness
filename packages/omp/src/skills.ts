@@ -23,7 +23,10 @@ export const MIN_PROMPT_CHARS = 12;
  * parts score 2 (a real word like "modding"), short ones 1 (an acronym like
  * "fh6"). Disjoint parts let both "fh6" and "modding" match "fh6-modding".
  */
-export function lexicalScores(text: string, roster: readonly SkillCandidate[]): Array<{ name: string; score: number }> {
+export function lexicalScores(
+  text: string,
+  roster: readonly SkillCandidate[],
+): Array<{ name: string; score: number }> {
   const lower = text.toLowerCase();
   return roster.map((s) => {
     const parts = s.name.toLowerCase().split(/[-_]/);
@@ -55,8 +58,10 @@ export function shortlistSkills(text: string, roster: readonly SkillCandidate[])
  */
 export function candidatePayload(
   roster: readonly SkillCandidate[],
-  shortlist: readonly SkillCandidate[]
+  shortlist: readonly SkillCandidate[],
 ): Array<{ name: string; description: string }> {
-  const byName = new Map(roster.map((s) => [s.name, s.description.replace(/\s+/g, " ").slice(0, 180)]));
+  const byName = new Map(
+    roster.map((s) => [s.name, s.description.replace(/\s+/g, " ").slice(0, 180)]),
+  );
   return shortlist.map((s) => ({ name: s.name, description: byName.get(s.name) ?? "" }));
 }

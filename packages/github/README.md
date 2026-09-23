@@ -31,15 +31,15 @@ jobs:
 
 ## Inputs
 
-| Input | Required | Default | Purpose |
-|---|---|---|---|
-| `typesafe-api-key` | no | — | Jev API key. Unset → fail-open comment, no Jev call. |
-| `pr-number` | no | event number | PR to comment on. |
-| `pr-title` / `pr-body` | no | event values | PR title and body. |
-| `pr-diff` | no | `git diff origin/HEAD...` | Diff text to judge. |
-| `reviewers` | no | auto/peer/security/perf | JSON array of `{name, description}`. |
-| `post` | no | `true` | `false` to only print the comment. |
-| `destructive-threshold` | no | `0.75` | Override the destructive-block threshold. |
+| Input                   | Required | Default                   | Purpose                                              |
+| ----------------------- | -------- | ------------------------- | ---------------------------------------------------- |
+| `typesafe-api-key`      | no       | —                         | Jev API key. Unset → fail-open comment, no Jev call. |
+| `pr-number`             | no       | event number              | PR to comment on.                                    |
+| `pr-title` / `pr-body`  | no       | event values              | PR title and body.                                   |
+| `pr-diff`               | no       | `git diff origin/HEAD...` | Diff text to judge.                                  |
+| `reviewers`             | no       | auto/peer/security/perf   | JSON array of `{name, description}`.                 |
+| `post`                  | no       | `true`                    | `false` to only print the comment.                   |
+| `destructive-threshold` | no       | `0.75`                    | Override the destructive-block threshold.            |
 
 ## Output
 
@@ -50,11 +50,11 @@ A comment like:
 
 > Advisory only. Jev emits calibrated probabilities; thresholds and side effects stay in your workflow.
 
-| decision | result |
-| --- | --- |
-| destructive | BLOCKED (p=0.90) |
-| urgency | Critical (3.10) |
-| reviewer | security (conf=0.85) |
+| decision    | result               |
+| ----------- | -------------------- |
+| destructive | BLOCKED (p=0.90)     |
+| urgency     | Critical (3.10)      |
+| reviewer    | security (conf=0.85) |
 
 **PR:** rewrite auth
 ```

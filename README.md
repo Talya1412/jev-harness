@@ -1,65 +1,80 @@
 # jev-harness
 
+[![CI](https://github.com/Talya1412/jev-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/Talya1412/jev-harness/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@jev-harness/core.svg)](https://www.npmjs.com/package/@jev-harness/core)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+
 Integrations for **[TypeSafe Jev](https://typesafe.ai)** — the System One decision model — across fourteen packages spanning agent harnesses, CI actions, CLIs, and editor extensions.
 
 Jev is not a chat model. You send it a `state` plus typed `questions` and it returns **calibrated probabilities** your code acts on directly. That makes it the right tool for routing, ranking, gating, and verification — anywhere you currently pay a chat model to emit JSON you immediately parse.
 
 ## Packages
 
-| Package | Harness | Transport | Capabilities |
-|---|---|---|---|
-| [`@jev-harness/core`](packages/core) | — | — | Client, primitives, 23 patterns, redaction, budget guard, caches, decision log |
-| [`@jev-harness/omp`](packages/omp) | [Oh My Pi](https://github.com/can1357/oh-my-pi) | Extension | 5 tools + 3 hooks (incl. verbatim compaction) |
-| [`@jev-harness/mcp`](packages/mcp) | Any MCP client | MCP over stdio | 7 tools |
-| [`@jev-harness/claude-code`](packages/claude-code) | Claude Code | Plugin | PreToolUse gate + prompt skill routing |
-| [`@jev-harness/pi`](packages/pi) | Pi | Extension | 5 tools + 2 hooks |
-| [`@jev-harness/eval`](packages/eval) | — | `jev-eval` + `jev-tune` CLIs | Labeled-dataset evaluation, calibration, threshold sweeps, golden baselines |
-| [`@jev-harness/github`](packages/github) | GitHub Actions | Action | `jev-review`: advisory PR review comment (fail-open) |
-| [`@jev-harness/jev-gate-action`](packages/jev-gate-action) | GitHub Actions | Action | Semantic acceptance gate: destructive + secret-leak + risk on a PR diff |
-| [`@jev-harness/pr-triage-action`](packages/pr-triage-action) | GitHub Actions | Action | PR triage: auth impact, risk score, review routing |
-| [`@jev-harness/kit`](packages/kit) | — | — | Shared adapter foundation: env config, result envelope, core-pattern plumbing |
-| [`@jev-harness/playground`](packages/playground) | — | `npm run playground` | Local web playground: state + questions → live probabilities |
-| [`@jev-harness/cli`](packages/cli) | CI / subagent workflows | `jev` + `jev-gate` CLIs | `jev ask/models/eval` terminal access + `jev-gate` semantic acceptance gate |
-| [`jev-py`](packages/jev-py) | Python | stdlib-only client | Async client, 12+ patterns, eval + tune (parity-tested against the TS metrics) |
-| [`@jev-harness/vscode`](packages/vscode) | VS Code | Extension | Destructive-change gate + claim verification, fail-open |
+| Package                                                      | Harness                                         | Transport                    | Capabilities                                                                   |
+| ------------------------------------------------------------ | ----------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------ |
+| [`@jev-harness/core`](packages/core)                         | —                                               | —                            | Client, primitives, 23 patterns, redaction, budget guard, caches, decision log |
+| [`@jev-harness/omp`](packages/omp)                           | [Oh My Pi](https://github.com/can1357/oh-my-pi) | Extension                    | 5 tools + 3 hooks (incl. verbatim compaction)                                  |
+| [`@jev-harness/mcp`](packages/mcp)                           | Any MCP client                                  | MCP over stdio               | 7 tools                                                                        |
+| [`@jev-harness/claude-code`](packages/claude-code)           | Claude Code                                     | Plugin                       | PreToolUse gate + prompt skill routing                                         |
+| [`@jev-harness/pi`](packages/pi)                             | Pi                                              | Extension                    | 5 tools + 2 hooks                                                              |
+| [`@jev-harness/eval`](packages/eval)                         | —                                               | `jev-eval` + `jev-tune` CLIs | Labeled-dataset evaluation, calibration, threshold sweeps, golden baselines    |
+| [`@jev-harness/github`](packages/github)                     | GitHub Actions                                  | Action                       | `jev-review`: advisory PR review comment (fail-open)                           |
+| [`@jev-harness/jev-gate-action`](packages/jev-gate-action)   | GitHub Actions                                  | Action                       | Semantic acceptance gate: destructive + secret-leak + risk on a PR diff        |
+| [`@jev-harness/pr-triage-action`](packages/pr-triage-action) | GitHub Actions                                  | Action                       | PR triage: auth impact, risk score, review routing                             |
+| [`@jev-harness/kit`](packages/kit)                           | —                                               | —                            | Shared adapter foundation: env config, result envelope, core-pattern plumbing  |
+| [`@jev-harness/playground`](packages/playground)             | —                                               | `npm run playground`         | Local web playground: state + questions → live probabilities                   |
+| [`@jev-harness/cli`](packages/cli)                           | CI / subagent workflows                         | `jev` + `jev-gate` CLIs      | `jev ask/models/eval` terminal access + `jev-gate` semantic acceptance gate    |
+| [`jev-py`](packages/jev-py)                                  | Python                                          | stdlib-only client           | Async client, 12+ patterns, eval + tune (parity-tested against the TS metrics) |
+| [`@jev-harness/vscode`](packages/vscode)                     | VS Code                                         | Extension                    | Destructive-change gate + claim verification, fail-open                        |
 
 ## Why Jev
 
 **Cheaper than a chat model for closed-set decisions.** Input tokens bill at $0.042/Mtok and output tokens are free, because Jev emits probabilities, not prose. One call can carry many questions at once — they are evaluated independently against the same state, so batching is nearly free.
 
-**Typed by construction.** A `choice` question cannot return a string outside its criteria map. It can still be *wrong* — calibration is not correctness — so keep thresholds and side effects in your own code and validate on your own labeled data.
+**Typed by construction.** A `choice` question cannot return a string outside its criteria map. It can still be _wrong_ — calibration is not correctness — so keep thresholds and side effects in your own code and validate on your own labeled data.
 
 ## The three primitives
 
-| Primitive | Asks | Returns |
-|---|---|---|
-| `noul` | Whether a condition holds | `noul`: P(yes), 0–1. No separate confidence field; ~0.5 means yes and no are equally likely. |
-| `choice` | One of a defined set | `choice` (winner key) + `probabilities` + `confidence` |
-| `score` | Degree along an ordered rubric | `score` (probability-weighted, can land between levels) + `probabilities` + `confidence` |
+| Primitive | Asks                           | Returns                                                                                      |
+| --------- | ------------------------------ | -------------------------------------------------------------------------------------------- |
+| `noul`    | Whether a condition holds      | `noul`: P(yes), 0–1. No separate confidence field; ~0.5 means yes and no are equally likely. |
+| `choice`  | One of a defined set           | `choice` (winner key) + `probabilities` + `confidence`                                       |
+| `score`   | Degree along an ordered rubric | `score` (probability-weighted, can land between levels) + `probabilities` + `confidence`     |
 
 Mix them freely in one call:
 
 ```ts
 import { askJev, choice, noul } from "@jev-harness/core";
 
-const res = await askJev({ apiKey: process.env.TYPESAFE_API_KEY! }, {
-  diff: "Changed the login redirect URL and session cookie flags.",
-}, {
-  touches_auth: { type: "noul", instructions: "Does this change affect authentication or session security?" },
-  risk: {
-    type: "score",
-    instructions: "Security risk level",
-    criteria: ["None", "Low", "Moderate", "High", "Critical"],
+const res = await askJev(
+  { apiKey: process.env.TYPESAFE_API_KEY! },
+  {
+    diff: "Changed the login redirect URL and session cookie flags.",
   },
-  route: {
-    type: "choice",
-    instructions: "Who should review this?",
-    criteria: { auto: "No human needed", peer: "Normal review", security: "Needs a security reviewer" },
+  {
+    touches_auth: {
+      type: "noul",
+      instructions: "Does this change affect authentication or session security?",
+    },
+    risk: {
+      type: "score",
+      instructions: "Security risk level",
+      criteria: ["None", "Low", "Moderate", "High", "Critical"],
+    },
+    route: {
+      type: "choice",
+      instructions: "Who should review this?",
+      criteria: {
+        auto: "No human needed",
+        peer: "Normal review",
+        security: "Needs a security reviewer",
+      },
+    },
   },
-});
+);
 
-noul(res, "touches_auth");   // 0.97
-score(res, "risk");          // { score: 2.02, ... }
+noul(res, "touches_auth"); // 0.97
+score(res, "risk"); // { score: 2.02, ... }
 choice(res, "route").choice; // "security"
 ```
 
@@ -72,7 +87,7 @@ choice(res, "route").choice; // "security"
 - **`chooseBrowserAction`** — pick one browser action from a numbered element table. Advisory only; the caller validates the index against the live snapshot.
 - **`pickTool`** — choose one tool from a candidate set and flag confirmation-worthy side effects.
 - **`rankCandidates`** — score a list of strings against a task, best-first.
-- **`gateInjection`** — gate untrusted tool results and fetched pages for prompt injection *before* they reach the model. Threshold 0.7.
+- **`gateInjection`** — gate untrusted tool results and fetched pages for prompt injection _before_ they reach the model. Threshold 0.7.
 - **`verifyStep`** — did the finished work actually satisfy the task? Jev as a cheap critic; loop only when `done` is false.
 - **`needsClarification`** — detect a genuine fork (two materially different readings) so the agent asks before burning tokens on a wrong guess.
 - **`isDuplicate`** — semantic dedup of memory entries and tool results in one batched call.
@@ -138,16 +153,16 @@ Recorded finding worth knowing: `chmod -R 777 /` and fork bombs score LOW agains
 
 Every adapter resolves credentials the same way:
 
-| Variable | Required | Default | Purpose |
-|---|---|---|---|
-| `TYPESAFE_API_KEY` | yes | — | Bearer token from [console.typesafe.ai](https://console.typesafe.ai) |
-| `TYPESAFE_BASE_URL` | no | `https://api.typesafe.ai` | Override the API host |
-| `TYPESAFE_DEFAULT_MODEL` | no | `jev-latest` | Pin a model version once thresholds are tuned |
-| `JEV_TIMEOUT_MS` | no | `15000` | Per-request timeout |
-| `JEV_REDACT` / `OMP_JEV_REDACT` | no | on (hooks) | `"0"` disables state redaction |
-| `OMP_JEV_MAX_CALLS_PER_MIN` | no | `120` | Rolling-window budget for the OMP adapter; `0` disables |
-| `OMP_JEV_CACHE_DIR` / `OMP_JEV_CACHE_TTL_MS` | no | `~/.omp/cache/jev-harness`, 24h | Persistent judgment cache |
-| `OMP_JEV_DECISION_LOG` | no | — | Path to a JSONL file for gate decision records |
+| Variable                                     | Required | Default                         | Purpose                                                              |
+| -------------------------------------------- | -------- | ------------------------------- | -------------------------------------------------------------------- |
+| `TYPESAFE_API_KEY`                           | yes      | —                               | Bearer token from [console.typesafe.ai](https://console.typesafe.ai) |
+| `TYPESAFE_BASE_URL`                          | no       | `https://api.typesafe.ai`       | Override the API host                                                |
+| `TYPESAFE_DEFAULT_MODEL`                     | no       | `jev-latest`                    | Pin a model version once thresholds are tuned                        |
+| `JEV_TIMEOUT_MS`                             | no       | `15000`                         | Per-request timeout                                                  |
+| `JEV_REDACT` / `OMP_JEV_REDACT`              | no       | on (hooks)                      | `"0"` disables state redaction                                       |
+| `OMP_JEV_MAX_CALLS_PER_MIN`                  | no       | `120`                           | Rolling-window budget for the OMP adapter; `0` disables              |
+| `OMP_JEV_CACHE_DIR` / `OMP_JEV_CACHE_TTL_MS` | no       | `~/.omp/cache/jev-harness`, 24h | Persistent judgment cache                                            |
+| `OMP_JEV_DECISION_LOG`                       | no       | —                               | Path to a JSONL file for gate decision records                       |
 
 Credentials are read from the environment and never logged.
 
@@ -163,11 +178,18 @@ Credentials are read from the environment and never logged.
 ## Development
 
 ```bash
-npm install
-npm run build
+npm install        # add --include=dev when NODE_ENV=production
+npm run build      # core first, then every adapter (+ committed bundles)
 npm run typecheck
 npm test
+npm run lint       # ESLint
+npm run format     # Prettier
+npm run qa         # build + typecheck + lint + format:check + test
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the release flow and the rules on
+committed build artifacts, and [SECURITY.md](SECURITY.md) to report a
+vulnerability.
 
 ## License
 

@@ -28,7 +28,12 @@
  * - JEV_REDACT              "0" disables state redaction (default: on)
  */
 import { readFileSync, writeSync } from "node:fs";
-import { judgeDestructive, routeSkill, type JevConfig, type SkillCandidate } from "@jev-harness/core";
+import {
+  judgeDestructive,
+  routeSkill,
+  type JevConfig,
+  type SkillCandidate,
+} from "@jev-harness/core";
 import {
   DEFAULT_DESTRUCTIVE_THRESHOLD,
   DEFAULT_SKILL_CONFIDENCE,
@@ -79,7 +84,10 @@ async function runPreToolUse(input: Record<string, unknown>): Promise<void> {
     if (!GATED_TOOLS.has(toolName)) allow();
     const config = buildConfig();
     if (!config) allow();
-    const threshold = parseNumber(process.env.JEV_DESTRUCTIVE_THRESHOLD, DEFAULT_DESTRUCTIVE_THRESHOLD);
+    const threshold = parseNumber(
+      process.env.JEV_DESTRUCTIVE_THRESHOLD,
+      DEFAULT_DESTRUCTIVE_THRESHOLD,
+    );
     const result = await judgeDestructive(
       config as JevConfig,
       {

@@ -35,11 +35,7 @@ function okFetch(onCall?: (i: number) => void) {
 describe("runEval", () => {
   it("counts every attempt in requests and prices output as free", async () => {
     const { impl } = okFetch();
-    const report = await runEval(
-      { apiKey: "k", fetchImpl: impl },
-      dataset(3),
-      { sweep: false },
-    );
+    const report = await runEval({ apiKey: "k", fetchImpl: impl }, dataset(3), { sweep: false });
     expect(report.failedCases).toBe(0);
     expect(report.usage.requests).toBe(3);
     expect(report.usage.inputTokens).toBe(30);
@@ -66,9 +62,12 @@ describe("runEval", () => {
     const { impl, calls } = okFetch();
     const controller = new AbortController();
     controller.abort();
-    await expect(runEval({ apiKey: "k", fetchImpl: impl }, dataset(4), { sweep: false, signal: controller.signal })).rejects.toThrow(
-      /aborted/,
-    );
+    await expect(
+      runEval({ apiKey: "k", fetchImpl: impl }, dataset(4), {
+        sweep: false,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(/aborted/);
     expect(calls()).toBe(0);
   });
 });

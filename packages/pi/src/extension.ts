@@ -18,25 +18,12 @@ import {
   noul,
   pickTool,
   routeSkill,
-  type JevConfig,
   type Questions,
 } from "@jev-harness/core";
-import type {
-  ExtensionAPI,
-  SessionBeforeCompactEvent,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import {
-  blockText,
-  collectToolPairs,
-  keepThreshold,
-  resolveJevConfig,
-  truncate,
-  DEFAULT_KEEP_THRESHOLD,
-  MAX_COMPACTION_PAIRS,
-  type ToolPair,
-} from "./compact.js";
+import { collectToolPairs, keepThreshold, resolveJevConfig } from "./compact.js";
 
 /** Bound once; the pure helpers take it as a parameter so tests need no globals. */
 const ENV = process.env;
@@ -99,13 +86,10 @@ export default function jevPi(pi: ExtensionAPI): void {
     execute: async () => {
       try {
         const models = await listJevModels(resolveJevConfig(ENV));
-        const lines = models.map((m) =>
-          m.description ? m.name + " - " + m.description : m.name,
-        );
-        return ok(
-          lines.length > 0 ? lines.join("\n") : "No Jev models returned.",
-          { count: models.length },
-        );
+        const lines = models.map((m) => (m.description ? m.name + " - " + m.description : m.name));
+        return ok(lines.length > 0 ? lines.join("\n") : "No Jev models returned.", {
+          count: models.length,
+        });
       } catch (err) {
         return ok(errorText("jev_models", err));
       }
@@ -127,8 +111,7 @@ export default function jevPi(pi: ExtensionAPI): void {
           description: Type.Optional(Type.String()),
         }),
         {
-          description:
-            "Candidate skills. Descriptions matter far more than names.",
+          description: "Candidate skills. Descriptions matter far more than names.",
         },
       ),
       minConfidence: Type.Optional(
@@ -273,14 +256,20 @@ export default function jevPi(pi: ExtensionAPI): void {
           instructions:
             "This tool call is still load-bearing for the ongoing task; " +
             "dropping it from context would lose information the agent still needs. " +
-            "Tool: " + p.tool + ". Arguments: " + p.argsText,
+            "Tool: " +
+            p.tool +
+            ". Arguments: " +
+            p.argsText,
         };
         questions["keep_result_" + p.key] = {
           type: "noul",
           instructions:
             "The result of this tool call is still needed for the ongoing task; " +
             "dropping it would lose information the agent still needs. " +
-            "Tool: " + p.tool + ". Result (head): " + p.resultText,
+            "Tool: " +
+            p.tool +
+            ". Result (head): " +
+            p.resultText,
         };
       }
       const response = await askJev(
@@ -301,12 +290,12 @@ export default function jevPi(pi: ExtensionAPI): void {
         try {
           keepCall = noul(response, "keep_call_" + p.key);
         } catch {
-          keepCall = 1;
+          /* keep the default */
         }
         try {
           keepResult = noul(response, "keep_result_" + p.key);
         } catch {
-          keepResult = 1;
+          /* keep the default */
         }
         return {
           key: p.key,

@@ -37,16 +37,16 @@ npm --workspace @jev-harness/claude-code run build
 The key is never hardcoded and never logged. All settings come from the
 environment:
 
-| Variable | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `TYPESAFE_API_KEY` | yes | — | TypeSafe API key. Without it both hooks stay silent (fail open). |
-| `TYPESAFE_BASE_URL` | no | core default | API base override. |
-| `TYPESAFE_DEFAULT_MODEL` | no | `jev-latest` | Jev model override. Also settable as the `model` plugin `userConfig`. |
-| `JEV_TIMEOUT_MS` | no | 15000 | Per-request timeout in ms. |
-| `JEV_DESTRUCTIVE_THRESHOLD` | no | `0.75` | `destructive` probability at or above which PreToolUse denies. Also settable as the `destructiveThreshold` plugin `userConfig`. |
-| `JEV_SKILL_CONFIDENCE` | no | `0.5` | Minimum routing confidence before the advisor speaks. Also settable as the `skillConfidence` plugin `userConfig`. |
-| `JEV_SKILLS_JSON` | no | — | Inline JSON array of `{ name, description }` skill candidates. |
-| `JEV_SKILLS_FILE` | no | — | Path to a JSON file with the same shape (used when `JEV_SKILLS_JSON` is unset). |
+| Variable                    | Required | Default      | Purpose                                                                                                                         |
+| --------------------------- | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `TYPESAFE_API_KEY`          | yes      | —            | TypeSafe API key. Without it both hooks stay silent (fail open).                                                                |
+| `TYPESAFE_BASE_URL`         | no       | core default | API base override.                                                                                                              |
+| `TYPESAFE_DEFAULT_MODEL`    | no       | `jev-latest` | Jev model override. Also settable as the `model` plugin `userConfig`.                                                           |
+| `JEV_TIMEOUT_MS`            | no       | 15000        | Per-request timeout in ms.                                                                                                      |
+| `JEV_DESTRUCTIVE_THRESHOLD` | no       | `0.75`       | `destructive` probability at or above which PreToolUse denies. Also settable as the `destructiveThreshold` plugin `userConfig`. |
+| `JEV_SKILL_CONFIDENCE`      | no       | `0.5`        | Minimum routing confidence before the advisor speaks. Also settable as the `skillConfidence` plugin `userConfig`.               |
+| `JEV_SKILLS_JSON`           | no       | —            | Inline JSON array of `{ name, description }` skill candidates.                                                                  |
+| `JEV_SKILLS_FILE`           | no       | —            | Path to a JSON file with the same shape (used when `JEV_SKILLS_JSON` is unset).                                                 |
 
 Export the plugin `userConfig` values (`apiKey`, `model`,
 `destructiveThreshold`, `skillConfidence`) as the matching environment

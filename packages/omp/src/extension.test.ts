@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import jevExtension from "../src/extension.js";
 
-const TOOL_NAMES = ["jev_ask", "jev_models", "jev_route_skills", "jev_browse_action", "jev_pick_tool"];
+const TOOL_NAMES = [
+  "jev_ask",
+  "jev_models",
+  "jev_route_skills",
+  "jev_browse_action",
+  "jev_pick_tool",
+];
 const HOOK_NAMES = ["tool_call", "input", "session_before_compact"];
 
 /** Minimal pi host: captures tool + hook registrations for observable assertions. */
@@ -45,7 +51,7 @@ const savedEnv = new Map<string, string | undefined>();
 
 function setEnv(vars: Record<string, string>) {
   for (const key of ENV_KEYS) {
-    if (!(savedEnv.has(key))) savedEnv.set(key, process.env[key]);
+    if (!savedEnv.has(key)) savedEnv.set(key, process.env[key]);
     delete process.env[key];
   }
   for (const [key, value] of Object.entries(vars)) process.env[key] = value;
@@ -90,7 +96,7 @@ describe("jev_models tool path", () => {
         ok: true,
         status: 200,
         json: async () => ({ models: [{ name: "jev-latest" }] }),
-      }))
+      })),
     );
 
     const tool = tools.get("jev_models")!;
@@ -113,7 +119,7 @@ describe("tool_call gate fail-open", () => {
         ok: false,
         status: 400,
         text: async () => "bad request",
-      }))
+      })),
     );
 
     const gate = handlers.get("tool_call")!;

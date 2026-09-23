@@ -3,7 +3,7 @@
  * formatting. The I/O entrypoint (`./cli.js`) wires this to stdin/stdout/exit
  * so the logic is testable without a process.
  */
-import { tune, type TuneObjective, type TuneSummary } from "./tune.js";
+import type { TuneObjective, TuneSummary } from "./tune.js";
 
 export interface TuneOptions {
   objective: TuneObjective;
@@ -30,7 +30,8 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       case "-f":
       case "--file": {
         const raw = argv[++i];
-        if (raw === undefined || raw.trim() === "") return { ok: false, error: arg + " requires a path" };
+        if (raw === undefined || raw.trim() === "")
+          return { ok: false, error: arg + " requires a path" };
         options.file = raw;
         break;
       }
@@ -81,8 +82,24 @@ function readOutcome(obj: Record<string, unknown>): boolean | undefined {
   }
   if (raw === undefined) return undefined;
   if (typeof raw === "boolean") return raw;
-  if (raw === 1 || raw === "1" || raw === "true" || raw === "yes" || raw === "pos" || raw === "positive") return true;
-  if (raw === 0 || raw === "0" || raw === "false" || raw === "no" || raw === "neg" || raw === "negative") return false;
+  if (
+    raw === 1 ||
+    raw === "1" ||
+    raw === "true" ||
+    raw === "yes" ||
+    raw === "pos" ||
+    raw === "positive"
+  )
+    return true;
+  if (
+    raw === 0 ||
+    raw === "0" ||
+    raw === "false" ||
+    raw === "no" ||
+    raw === "neg" ||
+    raw === "negative"
+  )
+    return false;
   return undefined;
 }
 
@@ -101,7 +118,10 @@ export function loadDataset(text: string): DatasetResult {
     try {
       parsed = JSON.parse(trimmed);
     } catch (err) {
-      return { ok: false, error: "invalid JSON array: " + (err instanceof Error ? err.message : String(err)) };
+      return {
+        ok: false,
+        error: "invalid JSON array: " + (err instanceof Error ? err.message : String(err)),
+      };
     }
     if (!Array.isArray(parsed)) return { ok: false, error: "JSON must be an array" };
     records = parsed as Record<string, unknown>[];
@@ -113,7 +133,14 @@ export function loadDataset(text: string): DatasetResult {
       try {
         records.push(JSON.parse(l) as Record<string, unknown>);
       } catch (err) {
-        return { ok: false, error: "invalid JSONL line '" + l.slice(0, 60) + "': " + (err instanceof Error ? err.message : String(err)) };
+        return {
+          ok: false,
+          error:
+            "invalid JSONL line '" +
+            l.slice(0, 60) +
+            "': " +
+            (err instanceof Error ? err.message : String(err)),
+        };
       }
     }
   }
@@ -125,9 +152,11 @@ export function loadDataset(text: string): DatasetResult {
     const rec = records[i]!;
     const p = readPrediction(rec);
     const y = readOutcome(rec);
-    if (p === undefined) return { ok: false, error: "sample " + i + " is missing a numeric probability" };
+    if (p === undefined)
+      return { ok: false, error: "sample " + i + " is missing a numeric probability" };
     if (y === undefined) return { ok: false, error: "sample " + i + " is missing an outcome" };
-    if (p < 0 || p > 1) return { ok: false, error: "sample " + i + " probability " + p + " is outside [0,1]" };
+    if (p < 0 || p > 1)
+      return { ok: false, error: "sample " + i + " probability " + p + " is outside [0,1]" };
     samples.push({ p, y });
   }
   return { ok: true, samples };
@@ -140,7 +169,13 @@ export function formatSummary(summary: TuneSummary, json: boolean): string {
   const lines = [
     "jev-tune  threshold sweep",
     "",
-    "data      n=" + summary.n + "  positives=" + summary.positives + "  (" + pct(summary.positives, summary.n) + ")",
+    "data      n=" +
+      summary.n +
+      "  positives=" +
+      summary.positives +
+      "  (" +
+      pct(summary.positives, summary.n) +
+      ")",
     "objective " + summary.objective + "  ->  best threshold = " + summary.bestThreshold.toFixed(3),
     "",
     "at best   precision=" + num(b.precision) + "  recall=" + num(b.recall) + "  f1=" + num(b.f1),
@@ -156,8 +191,14 @@ export function formatSummary(summary: TuneSummary, json: boolean): string {
   ];
   for (const row of summary.sweep.slice(0, 5)) {
     lines.push(
-      "  t=" + row.threshold.toFixed(3) + "  f1=" + num(row.f1) +
-      "  p=" + num(row.precision) + "  r=" + num(row.recall),
+      "  t=" +
+        row.threshold.toFixed(3) +
+        "  f1=" +
+        num(row.f1) +
+        "  p=" +
+        num(row.precision) +
+        "  r=" +
+        num(row.recall),
     );
   }
   return lines.join("\n");

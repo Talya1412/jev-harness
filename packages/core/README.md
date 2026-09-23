@@ -15,67 +15,74 @@ npm install @jev-harness/core
 ```ts
 import { askJev, noul, choice, score } from "@jev-harness/core";
 
-const res = await askJev({ apiKey: process.env.TYPESAFE_API_KEY! }, {
-  diff: "Changed the login redirect URL and session cookie flags.",
-}, {
-  touches_auth: { type: "noul", instructions: "Does this change affect authentication or session security?" },
-  risk: {
-    type: "score",
-    instructions: "Security risk level",
-    criteria: ["None", "Low", "Moderate", "High", "Critical"],
+const res = await askJev(
+  { apiKey: process.env.TYPESAFE_API_KEY! },
+  {
+    diff: "Changed the login redirect URL and session cookie flags.",
   },
-});
+  {
+    touches_auth: {
+      type: "noul",
+      instructions: "Does this change affect authentication or session security?",
+    },
+    risk: {
+      type: "score",
+      instructions: "Security risk level",
+      criteria: ["None", "Low", "Moderate", "High", "Critical"],
+    },
+  },
+);
 
-noul(res, "touches_auth");          // 0.97
-score(res, "risk").score;           // 2.02
+noul(res, "touches_auth"); // 0.97
+score(res, "risk").score; // 2.02
 ```
 
 ## API
 
 ### Transport
 
-| Function | Purpose |
-|---|---|
-| `askJev(config, state, questions, signal?)` | One System One call; batches every question into a single request. |
-| `listJevModels(config)` | Models available to the key. |
+| Function                                               | Purpose                                                                                               |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `askJev(config, state, questions, signal?)`            | One System One call; batches every question into a single request.                                    |
+| `listJevModels(config)`                                | Models available to the key.                                                                          |
 | `noul(res, id)` / `choice(res, id)` / `score(res, id)` | Typed accessors. Each throws on a missing or wrong-typed answer, so you never narrow a union by hand. |
-| `validateQuestions(questions)` | Validates before spending a request. |
+| `validateQuestions(questions)`                         | Validates before spending a request.                                                                  |
 
 ### Patterns
 
-| Function | Purpose |
-|---|---|
-| `routeSkill(config, message, skills, opts?)` | Pick the right skill for a request. Pass descriptions. |
-| `judgeDestructive(config, call, opts?)` | Whether a tool call destroys data. Default threshold 0.75. |
-| `chooseBrowserAction(config, input, opts?)` | One browser action from a numbered element table. Advisory. |
-| `pickTool(config, input, opts?)` | One tool from a candidate set, with a confirmation flag. |
-| `rankCandidates(config, task, candidates, opts?)` | Score a list best-first. |
-| `gateInjection(config, { source, content }, opts?)` | Prompt-injection gate for untrusted content before it reaches the model. Default threshold 0.7. |
-| `verifyStep(config, { task, report, evidence? }, opts?)` | Did the work satisfy the task? Cheap post-hoc critic. Default threshold 0.6. |
-| `needsClarification(config, { message, recent? }, opts?)` | Detect a genuine ambiguity fork worth one clarifying question. Default threshold 0.5. |
-| `isDuplicate(config, item, existing, opts?)` | Semantic dedup; one batched request, one `noul` per candidate. Default threshold 0.5. |
-| `routeEffort(config, { task, context? }, opts?)` | Cheap-vs-expensive model routing for a task. Default threshold 0.5. |
+| Function                                                  | Purpose                                                                                         |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `routeSkill(config, message, skills, opts?)`              | Pick the right skill for a request. Pass descriptions.                                          |
+| `judgeDestructive(config, call, opts?)`                   | Whether a tool call destroys data. Default threshold 0.75.                                      |
+| `chooseBrowserAction(config, input, opts?)`               | One browser action from a numbered element table. Advisory.                                     |
+| `pickTool(config, input, opts?)`                          | One tool from a candidate set, with a confirmation flag.                                        |
+| `rankCandidates(config, task, candidates, opts?)`         | Score a list best-first.                                                                        |
+| `gateInjection(config, { source, content }, opts?)`       | Prompt-injection gate for untrusted content before it reaches the model. Default threshold 0.7. |
+| `verifyStep(config, { task, report, evidence? }, opts?)`  | Did the work satisfy the task? Cheap post-hoc critic. Default threshold 0.6.                    |
+| `needsClarification(config, { message, recent? }, opts?)` | Detect a genuine ambiguity fork worth one clarifying question. Default threshold 0.5.           |
+| `isDuplicate(config, item, existing, opts?)`              | Semantic dedup; one batched request, one `noul` per candidate. Default threshold 0.5.           |
+| `routeEffort(config, { task, context? }, opts?)`          | Cheap-vs-expensive model routing for a task. Default threshold 0.5.                             |
 
 ### Caching, coalescing, failure policy
 
-| Export | Purpose |
-|---|---|
-| `createJevCache({ ttlMs?, maxEntries? })` | Bounded TTL cache for Jev responses. |
-| `createCachedClient(config, opts?)` | `ask()` with transparent response caching. |
-| `createCoalescer(config, { windowMs? })` | Merges concurrent same-state `ask` calls into one request. |
-| `stableStringify(value)` / `fnv1a(text)` | Deterministic JSON and hashing for custom keys. |
+| Export                                               | Purpose                                                        |
+| ---------------------------------------------------- | -------------------------------------------------------------- |
+| `createJevCache({ ttlMs?, maxEntries? })`            | Bounded TTL cache for Jev responses.                           |
+| `createCachedClient(config, opts?)`                  | `ask()` with transparent response caching.                     |
+| `createCoalescer(config, { windowMs? })`             | Merges concurrent same-state `ask` calls into one request.     |
+| `stableStringify(value)` / `fnv1a(text)`             | Deterministic JSON and hashing for custom keys.                |
 | `withFailMode(mode, fn, { open, closed, onError? })` | Explicit fail-open / fail-closed / throw policy per call site. |
 
 ### Config
 
 ```ts
 interface JevConfig {
-  apiKey: string;                 // required
-  baseUrl?: string;               // default https://api.typesafe.ai
-  model?: string;                 // default jev-latest
-  timeoutMs?: number;             // default 15000
-  maxAttempts?: number;           // default 3 (429 / 5xx / network only)
-  fetchImpl?: typeof fetch;       // injectable, for tests
+  apiKey: string; // required
+  baseUrl?: string; // default https://api.typesafe.ai
+  model?: string; // default jev-latest
+  timeoutMs?: number; // default 15000
+  maxAttempts?: number; // default 3 (429 / 5xx / network only)
+  fetchImpl?: typeof fetch; // injectable, for tests
   onRetry?: (attempt, error) => void;
 }
 ```

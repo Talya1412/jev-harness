@@ -31,8 +31,12 @@ describe("parseDatasetJson", () => {
   });
 
   it("rejects cases without state or label", () => {
-    expect(() => parseDatasetJson(JSON.stringify([{ state: { x: 1 } }]))).toThrow(/needs "state" and "label"/);
-    expect(() => parseDatasetJson(JSON.stringify([{ state: {}, label: "not-an-object" }]))).toThrow(/label must be an object/);
+    expect(() => parseDatasetJson(JSON.stringify([{ state: { x: 1 } }]))).toThrow(
+      /needs "state" and "label"/,
+    );
+    expect(() => parseDatasetJson(JSON.stringify([{ state: {}, label: "not-an-object" }]))).toThrow(
+      /label must be an object/,
+    );
   });
 });
 

@@ -23,7 +23,12 @@ export interface TuneSummary {
   /** Average precision; null when there are no positives. */
   prAuc: number | null;
   /** Candidates examined, best-first by the chosen objective. */
-  sweep: Array<{ threshold: number; precision: number | null; recall: number | null; f1: number | null }>;
+  sweep: Array<{
+    threshold: number;
+    precision: number | null;
+    recall: number | null;
+    f1: number | null;
+  }>;
 }
 
 /** Candidate thresholds to evaluate: every unique prediction plus 0.5. */

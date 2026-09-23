@@ -5,7 +5,12 @@ import { createJevToolkit } from "./toolkit.js";
 import { lexicalShortlist } from "./router.js";
 import type { JevResponse } from "@jev-harness/core";
 
-const ENV_KEYS = ["TYPESAFE_API_KEY", "TYPESAFE_BASE_URL", "TYPESAFE_DEFAULT_MODEL", "JEV_TIMEOUT_MS"] as const;
+const ENV_KEYS = [
+  "TYPESAFE_API_KEY",
+  "TYPESAFE_BASE_URL",
+  "TYPESAFE_DEFAULT_MODEL",
+  "JEV_TIMEOUT_MS",
+] as const;
 
 // Sanitize around every test: the host machine may legitimately export these.
 function clearEnv() {
@@ -30,7 +35,13 @@ describe("resolveEnvConfig", () => {
     process.env.TYPESAFE_DEFAULT_MODEL = "jev-1.13.0";
     process.env.JEV_TIMEOUT_MS = "2500";
     const cfg = resolveEnvConfig();
-    expect(cfg).toEqual({ apiKey: "k", baseUrl: "https://example.com", model: "jev-1.13.0", timeoutMs: 2500, redact: true });
+    expect(cfg).toEqual({
+      apiKey: "k",
+      baseUrl: "https://example.com",
+      model: "jev-1.13.0",
+      timeoutMs: 2500,
+      redact: true,
+    });
     process.env.JEV_REDACT = "0";
     expect(resolveEnvConfig().redact).toBe(false);
   });
@@ -62,7 +73,10 @@ describe("resolveEnvConfig", () => {
 
 describe("results", () => {
   it("wraps text and details in the standard envelope", () => {
-    expect(okResult("hi", { a: 1 })).toEqual({ content: [{ type: "text", text: "hi" }], details: { a: 1 } });
+    expect(okResult("hi", { a: 1 })).toEqual({
+      content: [{ type: "text", text: "hi" }],
+      details: { a: 1 },
+    });
     expect(okResult("hi").details).toBeUndefined();
   });
 
@@ -81,8 +95,11 @@ describe("createJevToolkit", () => {
     const fetchImpl = (async (_url: unknown, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body)));
       const answers: JevResponse["answers"] = {};
-      for (const id of Object.keys(bodies[bodies.length - 1].questions)) answers[id] = { type: "noul", noul: 0.5 };
-      return new Response(JSON.stringify({ model: bodies[bodies.length - 1].model, answers }), { status: 200 });
+      for (const id of Object.keys(bodies[bodies.length - 1].questions))
+        answers[id] = { type: "noul", noul: 0.5 };
+      return new Response(JSON.stringify({ model: bodies[bodies.length - 1].model, answers }), {
+        status: 200,
+      });
     }) as unknown as typeof fetch;
 
     const kit = createJevToolkit({ requireKey: true, fetchImpl });

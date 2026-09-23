@@ -67,7 +67,9 @@ export async function commitGate(
     safeToCommit,
     containsSecrets,
     risk,
-    commit: safeToCommit >= (opts.safeThreshold ?? 0.8) && containsSecrets < (opts.secretThreshold ?? 0.5),
+    commit:
+      safeToCommit >= (opts.safeThreshold ?? 0.8) &&
+      containsSecrets < (opts.secretThreshold ?? 0.5),
   };
 }
 
@@ -183,7 +185,11 @@ export async function testPrioritizer(
     questions,
     opts.signal,
   );
-  const scored = selected.map((name, i) => ({ name, index: i, relevance: noul(response, `t${i}`) }));
+  const scored = selected.map((name, i) => ({
+    name,
+    index: i,
+    relevance: noul(response, `t${i}`),
+  }));
   scored.sort((a, b) => b.relevance - a.relevance);
   return {
     ranked: scored.map(({ name, relevance }) => ({ name, relevance })),
@@ -233,7 +239,11 @@ export async function secretLeak(
   );
   const probabilities = selected.map((_, i) => noul(response, `s${i}`));
   const threshold = opts.threshold ?? 0.6;
-  return { probabilities, flagged: probabilities.map((p, i) => (p >= threshold ? i : -1)).filter((i) => i >= 0), truncated };
+  return {
+    probabilities,
+    flagged: probabilities.map((p, i) => (p >= threshold ? i : -1)).filter((i) => i >= 0),
+    truncated,
+  };
 }
 
 // ----------------------------- dedupeItems -----------------------------
@@ -270,7 +280,8 @@ export async function dedupeItems(
     };
   }
   // A single item can never be a duplicate of an earlier one; skip the call.
-  if (selected.length === 1) return { unique: [{ index: 0, item: selected[0]! }], duplicateIndexes: [], truncated };
+  if (selected.length === 1)
+    return { unique: [{ index: 0, item: selected[0]! }], duplicateIndexes: [], truncated };
   const response = await askJev(
     config,
     { items: selected.map((t, i) => ({ id: `d${i}`, text: t.slice(0, MAX_ITEM_CHARS) })) },
@@ -283,7 +294,9 @@ export async function dedupeItems(
   }
   const dupSet = new Set(duplicateIndexes);
   return {
-    unique: selected.map((item, index) => ({ index, item })).filter(({ index }) => !dupSet.has(index)),
+    unique: selected
+      .map((item, index) => ({ index, item }))
+      .filter(({ index }) => !dupSet.has(index)),
     duplicateIndexes,
     truncated,
   };
@@ -320,7 +333,10 @@ export async function logSeverity(
     error: "An operation failed; needs attention",
     critical: "Service loss, data danger, or security impact; act immediately",
   };
-  const questions: Record<string, { type: "choice"; instructions: string; criteria: Record<string, string> }> = {};
+  const questions: Record<
+    string,
+    { type: "choice"; instructions: string; criteria: Record<string, string> }
+  > = {};
   for (let i = 0; i < selected.length; i++) {
     questions[`l${i}`] = {
       type: "choice",

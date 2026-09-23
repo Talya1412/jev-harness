@@ -30,7 +30,12 @@ interface Judgment {
 }
 
 interface EventPayload {
-  pull_request?: { number: number; title?: string; body?: string | null; labels?: Array<{ name: string }> };
+  pull_request?: {
+    number: number;
+    title?: string;
+    body?: string | null;
+    labels?: Array<{ name: string }>;
+  };
 }
 
 interface PullRequest {
@@ -74,7 +79,11 @@ function appendSummary(text: string): void {
   if (file) appendFileSync(file, text + "\n");
 }
 
-export async function githubFetch(path: string, init: RequestInit = {}, accept?: string): Promise<Response> {
+export async function githubFetch(
+  path: string,
+  init: RequestInit = {},
+  accept?: string,
+): Promise<Response> {
   const base = env("GITHUB_API_URL") || "https://api.github.com";
   const headers: Record<string, string> = {
     Authorization: `Bearer ${env("INPUT_GITHUB_TOKEN") || env("GITHUB_TOKEN")}`,
@@ -130,7 +139,9 @@ async function upsertComment(repo: string, prNumber: number, body: string): Prom
   const existing = comments.find((c) => typeof c.body === "string" && c.body.includes(MARKER));
 
   const method = existing ? "PATCH" : "POST";
-  const path = existing ? `/repos/${repo}/issues/comments/${existing.id}` : `/repos/${repo}/issues/${prNumber}/comments`;
+  const path = existing
+    ? `/repos/${repo}/issues/comments/${existing.id}`
+    : `/repos/${repo}/issues/${prNumber}/comments`;
   const res = await githubFetch(path, { method, body: JSON.stringify({ body }) });
   if (!res.ok) throw new Error(`upserting the triage comment failed: HTTP ${res.status}`);
   const out = (await res.json()) as { html_url?: string };
@@ -159,7 +170,11 @@ async function run(): Promise<void> {
     return;
   }
 
-  const diffRes = await githubFetch(`/repos/${pr.repo}/pulls/${pr.number}`, {}, "application/vnd.github.diff");
+  const diffRes = await githubFetch(
+    `/repos/${pr.repo}/pulls/${pr.number}`,
+    {},
+    "application/vnd.github.diff",
+  );
   if (!diffRes.ok) throw new Error(`fetching the PR diff failed: HTTP ${diffRes.status}`);
   const diff = (await diffRes.text()).slice(0, numInput("max_diff_chars", 60000));
 

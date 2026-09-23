@@ -13,7 +13,7 @@ await build({
   bundle: true,
   format: "esm",
   platform: "node",
-  target: "node18",
+  target: "node20",
   // Keep host-provided modules external — OMP supplies them at runtime.
   external: ["@oh-my-pi/pi-coding-agent"],
   banner: {

@@ -30,7 +30,11 @@ export interface FailOutcomes<T> {
   onError?: (err: unknown) => void;
 }
 
-export async function withFailMode<T>(mode: FailMode, fn: () => Promise<T>, outcomes: FailOutcomes<T>): Promise<T> {
+export async function withFailMode<T>(
+  mode: FailMode,
+  fn: () => Promise<T>,
+  outcomes: FailOutcomes<T>,
+): Promise<T> {
   try {
     return await fn();
   } catch (err) {

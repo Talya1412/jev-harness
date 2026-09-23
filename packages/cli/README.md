@@ -86,11 +86,11 @@ Use `--fail-open` only when the surrounding pipeline explicitly prefers availabi
 
 ## Exit codes (`jev`)
 
-| Code | Meaning |
-|---|---|
-| 0 | Success |
-| 1 | Runtime error (missing key, API failure) |
-| 2 | Usage error (bad flags, invalid JSON, unknown command) |
+| Code | Meaning                                                |
+| ---- | ------------------------------------------------------ |
+| 0    | Success                                                |
+| 1    | Runtime error (missing key, API failure)               |
+| 2    | Usage error (bad flags, invalid JSON, unknown command) |
 
 ## Programmatic use
 

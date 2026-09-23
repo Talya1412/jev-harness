@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a new capability or adapter for jev-harness
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Feature requests are welcome. Describe the problem first — the solution
+        is easier to agree on once the use case is clear.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that is hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to see? A new pattern, adapter, or CLI flag?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds or other approaches you weighed.
+    validations:
+      required: false

@@ -24,7 +24,7 @@ borrowed and the file it influenced are listed for each.
 - License: MIT
 - Borrowed: the OMP integration specifics — that `session_before_compact`
   receives `{ preparation: { messagesToSummarize, turnPrefixMessages,
-  firstKeptEntryId, tokensBefore } }` and must return a `CompactionResult`,
+firstKeptEntryId, tokensBefore } }` and must return a `CompactionResult`,
   the lowered `keepThreshold` default of 0.2 (upstream's 0.5 is
   non-discriminating on real sessions), and the fail-open-to-native-compaction
   fallback.

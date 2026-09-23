@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { runCli, type CliIo } from "./cli.js";
 import type { JevResponse } from "@jev-harness/core";
 
-const ENV_KEYS = ["TYPESAFE_API_KEY", "TYPESAFE_BASE_URL", "TYPESAFE_DEFAULT_MODEL", "JEV_TIMEOUT_MS"] as const;
+const ENV_KEYS = [
+  "TYPESAFE_API_KEY",
+  "TYPESAFE_BASE_URL",
+  "TYPESAFE_DEFAULT_MODEL",
+  "JEV_TIMEOUT_MS",
+] as const;
 
 afterEach(() => {
   for (const k of ENV_KEYS) delete process.env[k];
@@ -140,7 +145,9 @@ describe("runCli", () => {
   it("gives a friendly error for a missing state file", async () => {
     process.env.TYPESAFE_API_KEY = "k";
     const cap = capture();
-    const code = await runCli(["ask", "--state", "/no/such/file.json", "--questions", "{}"], { ...cap.io });
+    const code = await runCli(["ask", "--state", "/no/such/file.json", "--questions", "{}"], {
+      ...cap.io,
+    });
     expect(code).toBe(2);
     expect(cap.read().err).toMatch(/--state: file not found/);
   });
@@ -174,10 +181,13 @@ describe("runCli", () => {
     expect(code).toBe(0);
     const bad = capture();
     expect(
-      await runCli(["ask", "--questions", '{"q":{"type":"noul","instructions":"ok?"}}', "--timeout-ms", "0"], {
-        fetchImpl: impl,
-        ...bad.io,
-      }),
+      await runCli(
+        ["ask", "--questions", '{"q":{"type":"noul","instructions":"ok?"}}', "--timeout-ms", "0"],
+        {
+          fetchImpl: impl,
+          ...bad.io,
+        },
+      ),
     ).toBe(2);
   });
 

@@ -37,7 +37,9 @@ async function main(): Promise<number> {
   }
 
   if (options.criteria.trim() === "") {
-    process.stderr.write("missing criteria: pass one with -c \"<text>\" or as a bare argument\n\n" + HELP);
+    process.stderr.write(
+      'missing criteria: pass one with -c "<text>" or as a bare argument\n\n' + HELP,
+    );
     return EXIT_ERROR;
   }
 
@@ -80,9 +82,9 @@ async function main(): Promise<number> {
       gate_passed: {
         type: "noul",
         instructions:
-          "Does the provided code, diff, or output satisfy this acceptance criteria: \"" +
+          'Does the provided code, diff, or output satisfy this acceptance criteria: "' +
           options.criteria +
-          "\"? Judge only what the state shows; missing evidence is not evidence of success.",
+          '"? Judge only what the state shows; missing evidence is not evidence of success.',
       },
     });
     const probability = noul(response, "gate_passed");
@@ -114,6 +116,8 @@ async function main(): Promise<number> {
 main()
   .then((code) => process.exit(code))
   .catch((err) => {
-    process.stderr.write("jev-gate failed: " + (err instanceof Error ? err.message : String(err)) + "\n");
+    process.stderr.write(
+      "jev-gate failed: " + (err instanceof Error ? err.message : String(err)) + "\n",
+    );
     process.exit(EXIT_ERROR);
   });

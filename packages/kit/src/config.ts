@@ -42,7 +42,10 @@ export function resolveEnvConfig(opts: ResolveEnvConfigOptions = {}): JevConfig 
   const config: JevConfig = {
     apiKey,
     baseUrl: ((process.env.TYPESAFE_BASE_URL ?? "").trim() || DEFAULT_BASE_URL).replace(/\/+$/, ""),
-    model: (opts.modelOverride ?? "").trim() || (process.env.TYPESAFE_DEFAULT_MODEL ?? "").trim() || DEFAULT_MODEL,
+    model:
+      (opts.modelOverride ?? "").trim() ||
+      (process.env.TYPESAFE_DEFAULT_MODEL ?? "").trim() ||
+      DEFAULT_MODEL,
     // Adapters built on the kit send tool input and history as state; redaction
     // is on unless JEV_REDACT=0.
     redact: (process.env.JEV_REDACT ?? "").trim() !== "0",

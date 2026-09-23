@@ -25,14 +25,33 @@ import {
 } from "@jev-harness/core";
 import { resolveEnvConfig } from "./config.js";
 
-export type RouteSkillsResult = { skill: string | null; confidence: number; probabilities: Record<string, number> };
-export type PickToolResult = { tool: string | null; confidence: number; risky: number; confirmRequired: boolean; act: boolean };
-export type BrowseActionResult = { operation: string | null; target: string | null; confidence: number; act: boolean };
+export type RouteSkillsResult = {
+  skill: string | null;
+  confidence: number;
+  probabilities: Record<string, number>;
+};
+export type PickToolResult = {
+  tool: string | null;
+  confidence: number;
+  risky: number;
+  confirmRequired: boolean;
+  act: boolean;
+};
+export type BrowseActionResult = {
+  operation: string | null;
+  target: string | null;
+  confidence: number;
+  act: boolean;
+};
 
 export interface JevToolkit {
   /** Fresh config per call. Throws when the toolkit requires a key and none is set. */
   config(modelOverride?: string): JevConfig;
-  ask(state: unknown, questions: Questions, opts?: { model?: string; signal?: AbortSignal }): Promise<JevResponse>;
+  ask(
+    state: unknown,
+    questions: Questions,
+    opts?: { model?: string; signal?: AbortSignal },
+  ): Promise<JevResponse>;
   models(signal?: AbortSignal): Promise<Array<{ name: string; description?: string }>>;
   routeSkills(
     message: string,
@@ -47,7 +66,13 @@ export interface JevToolkit {
     input: {
       goal: string;
       page: { url: string; title?: string; text?: string };
-      elements: Array<{ index: string; label: string; role?: string; value?: string; operations: string[] }>;
+      elements: Array<{
+        index: string;
+        label: string;
+        role?: string;
+        value?: string;
+        operations: string[];
+      }>;
       recentActions?: Array<{ action: string; kind?: string; pageChanged?: boolean }>;
     },
     opts?: { minConfidence?: number; signal?: AbortSignal },
@@ -71,7 +96,10 @@ export function createJevToolkit(
       // Contract: listJevModels(config, signal?). The core signal param lands
       // in parallel; forward it and fall back when the installed core still
       // takes a single argument (extra args are ignored at runtime anyway).
-      const list = listJevModels as (cfg: JevConfig, ...rest: unknown[]) => ReturnType<typeof listJevModels>;
+      const list = listJevModels as (
+        cfg: JevConfig,
+        ...rest: unknown[]
+      ) => ReturnType<typeof listJevModels>;
       if (signal?.aborted) return Promise.reject(new Error("Jev models call aborted"));
       if (!signal) return listJevModels(config());
       return new Promise((resolve, reject) => {

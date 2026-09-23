@@ -4,6 +4,10 @@
   "description": "Unified `jev` CLI for TypeSafe Jev (System One): ask, models, eval, plus the `jev-gate` post-run gate check for CI and subagents.",
   "type": "module",
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=20"
   },

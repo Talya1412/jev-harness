@@ -39,9 +39,15 @@ import {
   type JevConfig,
   type Questions,
 } from "@jev-harness/core";
-import { GATE_THRESHOLD, SKILL_MIN_CONFIDENCE, autoOn, envNum, readConfig, redactOn } from "./config.js";
+import {
+  GATE_THRESHOLD,
+  SKILL_MIN_CONFIDENCE,
+  autoOn,
+  envNum,
+  readConfig,
+  redactOn,
+} from "./config.js";
 import { COMPACT_DEFAULTS, jevAsker, planCompaction, type CompactDefaults } from "./compact.js";
-import { MIN_PROMPT_CHARS, candidatePayload, shortlistSkills, type SkillCandidate } from "./skills.js";
 
 /** `process.env` bound once, so the pure helpers stay testable. */
 const ENV = process.env;
@@ -54,7 +60,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * - persistent cache turns repeat judgments into free hits across sessions
  */
 const maxPerMin = envNum(ENV, "OMP_JEV_MAX_CALLS_PER_MIN", 120);
-const guard = maxPerMin > 0 ? createBudgetGuard({ maxPerWindow: maxPerMin, windowMs: 60_000 }) : null;
+const guard =
+  maxPerMin > 0 ? createBudgetGuard({ maxPerWindow: maxPerMin, windowMs: 60_000 }) : null;
 const persistentCache = createPersistentCache({
   dir: (ENV.OMP_JEV_CACHE_DIR ?? "").trim() || join(homedir(), ".omp", "cache", "jev-harness"),
   ttlMs: envNum(ENV, "OMP_JEV_CACHE_TTL_MS", DAY_MS),
@@ -69,7 +76,9 @@ function jevConfig(modelOverride?: string, redact?: boolean): JevConfig {
 
 /** Gate decisions: in-memory ring always, JSONL when OMP_JEV_DECISION_LOG is set. */
 const gateLog = createDecisionLog(
-  (ENV.OMP_JEV_DECISION_LOG ?? "").trim() ? { sink: jsonlSink((ENV.OMP_JEV_DECISION_LOG ?? "").trim()) } : {},
+  (ENV.OMP_JEV_DECISION_LOG ?? "").trim()
+    ? { sink: jsonlSink((ENV.OMP_JEV_DECISION_LOG ?? "").trim()) }
+    : {},
 );
 
 export default function jevExtension(pi: ExtensionAPI): void {
@@ -98,15 +107,24 @@ export default function jevExtension(pi: ExtensionAPI): void {
     parameters: z.object({
       state: z
         .union([z.string(), z.record(z.string(), z.any()), z.array(z.any())])
-        .describe("The content to judge — text, or a JSON object with named fields referenced by backticked paths."),
-      questions: z.record(z.string(), questionSchema).describe("Map of question id -> question definition."),
+        .describe(
+          "The content to judge — text, or a JSON object with named fields referenced by backticked paths.",
+        ),
+      questions: z
+        .record(z.string(), questionSchema)
+        .describe("Map of question id -> question definition."),
       model: z.string().optional().describe("Override model (default jev-latest)."),
     }),
     loadMode: "essential",
     approval: "read",
     async execute(_id: string, params: any, signal?: AbortSignal) {
       const cfg = jevConfig(params.model, redactOn(ENV, "tool"));
-      const result = await askJev(cfg, params.state, params.questions as unknown as Questions, signal ?? undefined);
+      const result = await askJev(
+        cfg,
+        params.state,
+        params.questions as unknown as Questions,
+        signal ?? undefined,
+      );
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         details: result,
@@ -148,7 +166,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
         cfg,
         params.task,
         params.skills.map((name: string) => ({ name })),
-        { signal: signal ?? undefined }
+        { signal: signal ?? undefined },
       );
       const hint =
         result.skill !== null
@@ -170,15 +188,36 @@ export default function jevExtension(pi: ExtensionAPI): void {
       "ADVISORY: this tool does not execute anything — validate the returned index against the live snapshot and act in code.",
     parameters: z.object({
       goal: z.string().describe("What the user wants to achieve on the page."),
-      elements: z.array(z.object({
-        index: z.string().describe("Stable element index from the snapshot, e.g. '3' or '5:2' for a select option."),
-        label: z.string().describe("Human-visible label."),
-        role: z.string().optional().describe("ARIA role, e.g. combobox / button / link."),
-        value: z.string().optional().describe("Current value, if any."),
-        operations: z.array(z.string()).describe("Operations this element supports, e.g. ['CLICK','TYPE_TEXT']."),
-      })).describe("Numbered interactive elements from the current snapshot."),
-      page: z.object({ url: z.string(), title: z.string().optional(), text: z.string().optional() }).describe("Current page context."),
-      recent_actions: z.array(z.object({ action: z.string(), kind: z.string().optional(), page_changed: z.boolean().optional() })).optional().describe("Last few actions taken."),
+      elements: z
+        .array(
+          z.object({
+            index: z
+              .string()
+              .describe(
+                "Stable element index from the snapshot, e.g. '3' or '5:2' for a select option.",
+              ),
+            label: z.string().describe("Human-visible label."),
+            role: z.string().optional().describe("ARIA role, e.g. combobox / button / link."),
+            value: z.string().optional().describe("Current value, if any."),
+            operations: z
+              .array(z.string())
+              .describe("Operations this element supports, e.g. ['CLICK','TYPE_TEXT']."),
+          }),
+        )
+        .describe("Numbered interactive elements from the current snapshot."),
+      page: z
+        .object({ url: z.string(), title: z.string().optional(), text: z.string().optional() })
+        .describe("Current page context."),
+      recent_actions: z
+        .array(
+          z.object({
+            action: z.string(),
+            kind: z.string().optional(),
+            page_changed: z.boolean().optional(),
+          }),
+        )
+        .optional()
+        .describe("Last few actions taken."),
     }),
     loadMode: "discoverable",
     approval: "read",
@@ -196,7 +235,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
             pageChanged: r?.page_changed,
           })),
         },
-        { signal: signal ?? undefined }
+        { signal: signal ?? undefined },
       );
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -213,12 +252,22 @@ export default function jevExtension(pi: ExtensionAPI): void {
       "Best when the candidate set is enumerable (few tools, closed-set args). ADVISORY: this does not execute the tool.",
     parameters: z.object({
       task: z.string().describe("What the user is asking for."),
-      tools: z.array(z.object({
-        name: z.string(),
-        description: z.string(),
-        args: z.record(z.string(), z.string()).optional().describe("Map of arg name -> type/description, for closed-set args."),
-      })).describe("Candidate tools to choose from."),
-      context: z.string().optional().describe("Extra context, e.g. recent error or file being worked on."),
+      tools: z
+        .array(
+          z.object({
+            name: z.string(),
+            description: z.string(),
+            args: z
+              .record(z.string(), z.string())
+              .optional()
+              .describe("Map of arg name -> type/description, for closed-set args."),
+          }),
+        )
+        .describe("Candidate tools to choose from."),
+      context: z
+        .string()
+        .optional()
+        .describe("Extra context, e.g. recent error or file being worked on."),
     }),
     loadMode: "discoverable",
     approval: "read",
@@ -227,7 +276,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
       const result = await pickTool(
         cfg,
         { task: params.task, tools: params.tools, context: params.context },
-        { signal: signal ?? undefined }
+        { signal: signal ?? undefined },
       );
       const out = {
         tool: result.tool,
@@ -261,13 +310,15 @@ export default function jevExtension(pi: ExtensionAPI): void {
       const verdict = await judgeDestructive(
         cfg,
         { tool: name, input: event?.input ?? {}, cwd: process.cwd() },
-        { threshold: GATE_THRESHOLD }
+        { threshold: GATE_THRESHOLD },
       );
       gateLog.record({
         ts: new Date().toISOString(),
         kind: "omp_gate",
         model: cfg.model ?? "unknown",
-        digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, ["destructive"]),
+        digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, [
+          "destructive",
+        ]),
         answers: { destructive: verdict.destructive },
         threshold: GATE_THRESHOLD,
         action: verdict.blocked ? "block" : "allow",
@@ -276,7 +327,10 @@ export default function jevExtension(pi: ExtensionAPI): void {
       if (verdict.blocked) {
         return {
           block: true,
-          reason: "jev gate: destructive effect likely (" + verdict.destructive.toFixed(2) + "). Re-issue with explicit confirmation or adjust the command.",
+          reason:
+            "jev gate: destructive effect likely (" +
+            verdict.destructive.toFixed(2) +
+            "). Re-issue with explicit confirmation or adjust the command.",
         };
       }
     } catch (err) {
@@ -297,62 +351,68 @@ export default function jevExtension(pi: ExtensionAPI): void {
   // Advisory only: injects ONE line, never blocks, never loads anything itself.
   // Append-only: returns additionalContext and never rewrites the system prefix,
   // so the provider prompt-cache prefix stays intact between turns.
-  (pi.on as (name: string, handler: (event: any, ctx: any) => unknown) => void)("input", async (event: any, ctx: any) => {
-    if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER")) return;
-    try {
-      const text = String(event?.text ?? event?.prompt ?? "");
-      if (text.length < 12) return;
-      let roster: Array<{ name: string; description: string }> = [];
+  (pi.on as (name: string, handler: (event: any, ctx: any) => unknown) => void)(
+    "input",
+    async (event: any, ctx: any) => {
+      if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER")) return;
       try {
-        roster = ((ctx?.skills ?? []) as Array<any>)
-          .map((s) => ({ name: String(s?.name ?? ""), description: String(s?.description ?? "") }))
-          .filter((s) => s.name !== "");
-      } catch {
-        roster = [];
-      }
-      if (roster.length === 0) return;
-      // Cheap lexical prefilter keeps the choice set small before spending a call.
-      const lower = text.toLowerCase();
-      const scored = roster.map((s) => {
-        const parts = s.name.toLowerCase().split(/[-_]/);
-        let score = 0;
-        for (const part of parts) {
-          if (part.length > 3 && lower.includes(part)) score += 2;
-          // also match the acronym form: fh6-modding -> "fh6"
-          if (part.length <= 4 && lower.includes(part)) score += 1;
+        const text = String(event?.text ?? event?.prompt ?? "");
+        if (text.length < 12) return;
+        let roster: Array<{ name: string; description: string }> = [];
+        try {
+          roster = ((ctx?.skills ?? []) as Array<any>)
+            .map((s) => ({
+              name: String(s?.name ?? ""),
+              description: String(s?.description ?? ""),
+            }))
+            .filter((s) => s.name !== "");
+        } catch {
+          roster = [];
         }
-        return { name: s.name, score };
-      });
-      const lexical = scored.filter((x) => x.score > 0).map((x) => x.name);
-      // If nothing matched lexically, still give Jev the roster when it is small
-      // enough for a choice; otherwise abstain rather than spend a weak call.
-      const shortlist = (lexical.length > 0 ? lexical : roster.map((s) => s.name)).slice(0, 12);
-      if (shortlist.length === 0) return;
-      // Names alone are ambiguous, so send a one-line description per candidate
-      // (core builds the choice criteria from these).
-      const byName = new Map<string, string>();
-      for (const s of roster) {
-        byName.set(s.name, s.description.replace(/\s+/g, " ").slice(0, 180));
+        if (roster.length === 0) return;
+        // Cheap lexical prefilter keeps the choice set small before spending a call.
+        const lower = text.toLowerCase();
+        const scored = roster.map((s) => {
+          const parts = s.name.toLowerCase().split(/[-_]/);
+          let score = 0;
+          for (const part of parts) {
+            if (part.length > 3 && lower.includes(part)) score += 2;
+            // also match the acronym form: fh6-modding -> "fh6"
+            if (part.length <= 4 && lower.includes(part)) score += 1;
+          }
+          return { name: s.name, score };
+        });
+        const lexical = scored.filter((x) => x.score > 0).map((x) => x.name);
+        // If nothing matched lexically, still give Jev the roster when it is small
+        // enough for a choice; otherwise abstain rather than spend a weak call.
+        const shortlist = (lexical.length > 0 ? lexical : roster.map((s) => s.name)).slice(0, 12);
+        if (shortlist.length === 0) return;
+        // Names alone are ambiguous, so send a one-line description per candidate
+        // (core builds the choice criteria from these).
+        const byName = new Map<string, string>();
+        for (const s of roster) {
+          byName.set(s.name, s.description.replace(/\s+/g, " ").slice(0, 180));
+        }
+        const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
+        const result = await routeSkill(
+          cfg,
+          text,
+          shortlist.map((name) => ({ name, description: byName.get(name) ?? "" })),
+          { minConfidence: SKILL_MIN_CONFIDENCE, maxCandidates: 12 },
+        );
+        if (result.skill !== null) {
+          return { additionalContext: "[jev] Consider loading skill: " + result.skill };
+        }
+      } catch (err) {
+        try {
+          pi.logger.debug("jev skill router skipped", { error: String(err) });
+        } catch {
+          // Logger unavailable — skip silently.
+        }
+        return;
       }
-      const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
-      const result = await routeSkill(
-        cfg,
-        text,
-        shortlist.map((name) => ({ name, description: byName.get(name) ?? "" })),
-        { minConfidence: SKILL_MIN_CONFIDENCE, maxCandidates: 12 }
-      );
-      if (result.skill !== null) {
-        return { additionalContext: "[jev] Consider loading skill: " + result.skill };
-      }
-    } catch (err) {
-      try {
-        pi.logger.debug("jev skill router skipped", { error: String(err) });
-      } catch {
-        // Logger unavailable — skip silently.
-      }
-      return;
-    }
-  });
+    },
+  );
 
   // ---- Verbatim compaction --------------------------------------------------
   // Why this shape: a summary is lossy — a path, exact error, or constraint can
@@ -374,7 +434,11 @@ export default function jevExtension(pi: ExtensionAPI): void {
       const effective: CompactDefaults = {
         keepThreshold: envNum(ENV, "OMP_JEV_KEEP_THRESHOLD", COMPACT_DEFAULTS.keepThreshold),
         maxStateTokens: envNum(ENV, "OMP_JEV_MAX_STATE_TOKENS", COMPACT_DEFAULTS.maxStateTokens),
-        maxRequestTokens: envNum(ENV, "OMP_JEV_MAX_REQUEST_TOKENS", COMPACT_DEFAULTS.maxRequestTokens),
+        maxRequestTokens: envNum(
+          ENV,
+          "OMP_JEV_MAX_REQUEST_TOKENS",
+          COMPACT_DEFAULTS.maxRequestTokens,
+        ),
         truncateHeadChars: envNum(ENV, "OMP_JEV_TRUNCATE_HEAD", COMPACT_DEFAULTS.truncateHeadChars),
         minReductionRatio: envNum(ENV, "OMP_JEV_MIN_REDUCTION", COMPACT_DEFAULTS.minReductionRatio),
       };
@@ -405,7 +469,11 @@ export default function jevExtension(pi: ExtensionAPI): void {
         compaction: {
           summary: plan.summary,
           shortSummary:
-            "Jev verbatim compaction: " + plan.dropped.length + "/" + plan.decisions.length + " tool outputs truncated",
+            "Jev verbatim compaction: " +
+            plan.dropped.length +
+            "/" +
+            plan.decisions.length +
+            " tool outputs truncated",
           firstKeptEntryId: prep.firstKeptEntryId,
           tokensBefore: prep.tokensBefore,
           details: {
@@ -421,7 +489,9 @@ export default function jevExtension(pi: ExtensionAPI): void {
     } catch (err) {
       // Fail open — native compaction must still happen.
       try {
-        pi.logger.warn("jev_compact failed, falling back to native compaction", { error: String(err) });
+        pi.logger.warn("jev_compact failed, falling back to native compaction", {
+          error: String(err),
+        });
       } catch {
         // Logger unavailable — fall back silently.
       }

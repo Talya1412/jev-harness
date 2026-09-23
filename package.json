@@ -13,6 +13,11 @@
     "build": "npm run build --workspace=@jev-harness/core && npm run build --workspace=@jev-harness/kit && npm run build --workspace=@jev-harness/eval && npm run build --workspaces --if-present",
     "typecheck": "npm run build --workspace=@jev-harness/core && npm run build --workspace=@jev-harness/kit && npm run build --workspace=@jev-harness/eval && npm run typecheck --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "qa": "npm run build && npm run typecheck && npm run lint && npm run format:check && npm test",
     "playground": "npm run start --workspace=@jev-harness/playground",
     "changeset": "changeset",
     "changeset:version": "changeset version && npm install --package-lock-only",
@@ -21,14 +26,19 @@
   "engines": {
     "node": ">=20"
   },
+  "packageManager": "npm@11.19.0",
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.1",
     "@changesets/cli": "^3.0.3",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.2",
+    "esbuild": "0.28.2",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.9",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.70.1",
     "vitest": "^5.0.1"
-  },
-  "dependencies": {
-    "esbuild": "0.28.2"
   }
 }

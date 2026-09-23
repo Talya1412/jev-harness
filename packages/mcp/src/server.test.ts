@@ -36,7 +36,11 @@ describe("MCP tool list", () => {
     expect(byName.get("jev_judge_destructive")!.inputSchema.required).toEqual(["tool", "input"]);
     expect(byName.get("jev_pick_tool")!.inputSchema.required).toEqual(["task", "tools"]);
     expect(byName.get("jev_rank")!.inputSchema.required).toEqual(["task", "candidates"]);
-    expect(byName.get("jev_browse_action")!.inputSchema.required).toEqual(["goal", "page", "elements"]);
+    expect(byName.get("jev_browse_action")!.inputSchema.required).toEqual([
+      "goal",
+      "page",
+      "elements",
+    ]);
   });
 
   it("declares no required arguments for the argument-free tools", () => {

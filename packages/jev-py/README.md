@@ -28,16 +28,16 @@ Every pattern has an async form (`judge_destructive`) and a sync wrapper (`judge
 
 ## What's ported
 
-| TS module | Python module | Notes |
-|---|---|---|
-| `core/client.ts` | `jev_harness.client` | `ask_jev`, `list_jev_models`, `noul`/`choice`/`score` accessors, `validate_questions`. Injectable `transport`. Retries 429/5xx/network with cubic backoff. |
-| `core/types.ts` | `jev_harness.types` | `JevConfig`, `JevError`, `JevResponse`, question/answer dataclasses. |
-| `core/patterns.ts` | `jev_harness.patterns` | `route_skill`, `judge_destructive` (@ 0.75), `choose_browser_action`, `pick_tool`, `rank_candidates`. |
-| `core/patterns-extra.ts` | `jev_harness.patterns_extra` | `verify_claim` (RAG gate), `detect_prompt_injection`, `needs_more_context`, `judge_regression`, `triage_urgency`, `choose_subagent`, `debate_judge`. |
-| `core/infra.ts` | `jev_harness.infra` | `with_cache`, `jev_batch`, `create_audit_log`/`with_audit`, `local_route_skill`. |
-| `eval/metrics.ts` | `jev_harness.eval.metrics` | `brier_score`, `ece`, `confusion_matrix`, `precision_recall_f1`, `roc_auc`, `pr_auc`. |
-| `eval/tune.ts` | `jev_harness.eval.tune` | `tune` (F1 / Youden sweep). |
-| `eval/cli.ts` | `jev_harness.eval.cli` | `jev-tune` console script. |
+| TS module                | Python module                | Notes                                                                                                                                                      |
+| ------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/client.ts`         | `jev_harness.client`         | `ask_jev`, `list_jev_models`, `noul`/`choice`/`score` accessors, `validate_questions`. Injectable `transport`. Retries 429/5xx/network with cubic backoff. |
+| `core/types.ts`          | `jev_harness.types`          | `JevConfig`, `JevError`, `JevResponse`, question/answer dataclasses.                                                                                       |
+| `core/patterns.ts`       | `jev_harness.patterns`       | `route_skill`, `judge_destructive` (@ 0.75), `choose_browser_action`, `pick_tool`, `rank_candidates`.                                                      |
+| `core/patterns-extra.ts` | `jev_harness.patterns_extra` | `verify_claim` (RAG gate), `detect_prompt_injection`, `needs_more_context`, `judge_regression`, `triage_urgency`, `choose_subagent`, `debate_judge`.       |
+| `core/infra.ts`          | `jev_harness.infra`          | `with_cache`, `jev_batch`, `create_audit_log`/`with_audit`, `local_route_skill`.                                                                           |
+| `eval/metrics.ts`        | `jev_harness.eval.metrics`   | `brier_score`, `ece`, `confusion_matrix`, `precision_recall_f1`, `roc_auc`, `pr_auc`.                                                                      |
+| `eval/tune.ts`           | `jev_harness.eval.tune`      | `tune` (F1 / Youden sweep).                                                                                                                                |
+| `eval/cli.ts`            | `jev_harness.eval.cli`       | `jev-tune` console script.                                                                                                                                 |
 
 ## Tuning a threshold
 

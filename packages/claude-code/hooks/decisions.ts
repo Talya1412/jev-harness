@@ -58,14 +58,23 @@ export interface PreToolUseDecision {
 }
 
 /** The deny payload for a call Jev scored at or above the threshold. */
-export function denyPayload(toolName: string, probability: number, threshold: number): PreToolUseDecision {
+export function denyPayload(
+  toolName: string,
+  probability: number,
+  threshold: number,
+): PreToolUseDecision {
   return {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
       permissionDecisionReason:
-        "Jev judged this " + toolName + " call destructive (p=" + probability.toFixed(2) +
-        " >= " + threshold + "). Review it before retrying.",
+        "Jev judged this " +
+        toolName +
+        " call destructive (p=" +
+        probability.toFixed(2) +
+        " >= " +
+        threshold +
+        "). Review it before retrying.",
     },
   };
 }
@@ -86,8 +95,11 @@ export function skillPayload(skill: string, confidence: number): UserPromptSubmi
     hookSpecificOutput: {
       hookEventName: "UserPromptSubmit",
       additionalContext:
-        "Jev skill suggestion (confidence " + (confidence * 100).toFixed(0) +
-        '%): this prompt looks like a job for the "' + skill + '" skill. Consider loading it if it is available.',
+        "Jev skill suggestion (confidence " +
+        (confidence * 100).toFixed(0) +
+        '%): this prompt looks like a job for the "' +
+        skill +
+        '" skill. Consider loading it if it is available.',
     },
   };
 }

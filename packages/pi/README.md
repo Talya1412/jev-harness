@@ -50,13 +50,13 @@ Requires Node >= 20 (Pi itself targets Node 24.18; see the reference repo).
 
 ## Environment
 
-| Variable | Meaning | Default |
-| --- | --- | --- |
-| `TYPESAFE_API_KEY` | TypeSafe API key. Read on every call, never logged. All tools/hooks fail open without it. | (none — required) |
-| `TYPESAFE_BASE_URL` | Jev endpoint override. | core default (`https://api.typesafe.ai`) |
-| `TYPESAFE_DEFAULT_MODEL` | Jev model override. | core default (`jev-latest`) |
-| `JEV_TIMEOUT_MS` | Per-request timeout in ms. | 15000 |
-| `OMP_JEV_KEEP_THRESHOLD` | Shared with the OMP adapter: `noul` keep-scores below this on *both* call and result mark a pair stale. | `0.2` |
+| Variable                 | Meaning                                                                                                 | Default                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `TYPESAFE_API_KEY`       | TypeSafe API key. Read on every call, never logged. All tools/hooks fail open without it.               | (none — required)                        |
+| `TYPESAFE_BASE_URL`      | Jev endpoint override.                                                                                  | core default (`https://api.typesafe.ai`) |
+| `TYPESAFE_DEFAULT_MODEL` | Jev model override.                                                                                     | core default (`jev-latest`)              |
+| `JEV_TIMEOUT_MS`         | Per-request timeout in ms.                                                                              | 15000                                    |
+| `OMP_JEV_KEEP_THRESHOLD` | Shared with the OMP adapter: `noul` keep-scores below this on _both_ call and result mark a pair stale. | `0.2`                                    |
 
 ```bash
 export TYPESAFE_API_KEY='...'

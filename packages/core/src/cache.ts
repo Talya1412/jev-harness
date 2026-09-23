@@ -10,7 +10,13 @@
  * Both are process-local, advisory, and purely an optimization: clearing them
  * at any time never changes correctness, only cost and latency.
  */
-import { askJev, validateQuestions, type JevConfig, type JevResponse, type Questions } from "./client.js";
+import {
+  askJev,
+  validateQuestions,
+  type JevConfig,
+  type JevResponse,
+  type Questions,
+} from "./client.js";
 
 /** Deterministic JSON stringify (object keys sorted) so equal states hash equal. */
 export function stableStringify(value: unknown): string {
@@ -38,7 +44,9 @@ export function fnv1a(input: string): string {
 }
 
 function clone<T>(value: T): T {
-  return typeof structuredClone === "function" ? structuredClone(value) : (JSON.parse(JSON.stringify(value)) as T);
+  return typeof structuredClone === "function"
+    ? structuredClone(value)
+    : (JSON.parse(JSON.stringify(value)) as T);
 }
 
 export interface JevCache {
@@ -129,7 +137,10 @@ export interface CoalescingClient {
  * Per-call `signal`s are intentionally NOT forwarded: a merged request
  * serves several callers, and aborting it for one would kill the rest.
  */
-export function createCoalescer(config: JevConfig, opts: { windowMs?: number } = {}): CoalescingClient {
+export function createCoalescer(
+  config: JevConfig,
+  opts: { windowMs?: number } = {},
+): CoalescingClient {
   const windowMs = Math.max(0, opts.windowMs ?? 10);
   type Item = {
     stateKey: string;

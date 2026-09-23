@@ -10,8 +10,8 @@
  * result — packages/eval/src/regression.test.ts and the live-eval workflow
  * both treat it as the reference point.
  */
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { askJev } from "@jev-harness/core";
 import {
@@ -23,7 +23,12 @@ import {
   thresholdSweep,
 } from "@jev-harness/eval";
 
-const [, , datasetPathArg = "packages/eval/golden/destructive-gate.json", questionIdArg = "destructive"] = process.argv;
+const [
+  ,
+  ,
+  datasetPathArg = "packages/eval/golden/destructive-gate.json",
+  questionIdArg = "destructive",
+] = process.argv;
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const datasetPath = resolve(repoRoot, datasetPathArg);
 

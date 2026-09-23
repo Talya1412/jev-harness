@@ -9,8 +9,12 @@
  */
 import { readFileSync } from "node:fs";
 
-const [, , reportPath = "report.json", baselinePath = "packages/eval/golden/destructive-gate.baseline.json"] =
-  process.argv;
+const [
+  ,
+  ,
+  reportPath = "report.json",
+  baselinePath = "packages/eval/golden/destructive-gate.baseline.json",
+] = process.argv;
 
 const report = JSON.parse(readFileSync(reportPath, "utf8"));
 const baseline = JSON.parse(readFileSync(baselinePath, "utf8"));
@@ -33,7 +37,9 @@ const baseThreshold = baseline.metrics.suggestedThreshold;
 // steps, so take the closest row when the exact threshold is not on it.
 const rows = metric.sweep?.rows ?? [];
 const row = rows.length
-  ? rows.reduce((best, r) => (Math.abs(r.threshold - baseThreshold) < Math.abs(best.threshold - baseThreshold) ? r : best))
+  ? rows.reduce((best, r) =>
+      Math.abs(r.threshold - baseThreshold) < Math.abs(best.threshold - baseThreshold) ? r : best,
+    )
   : null;
 const accuracyAtBaseline = row ? row.accuracy : metric.noul.accuracy;
 

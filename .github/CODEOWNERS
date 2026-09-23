@@ -1,0 +1,6 @@
+# Default owner for everything in the repo. Reviewers are requested from here.
+* @Talya1412
+
+# Release + CI plumbing warrants an explicit review.
+/.github/ @Talya1412
+/.changeset/ @Talya1412

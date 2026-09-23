@@ -40,20 +40,31 @@ describe("flatten", () => {
   it("reads text, tool_use, and tool_result blocks into one flat shape", () => {
     const [user, assistant, result] = flatten(regionWithResult("ok"));
     expect(user!.text).toBe("fix the failing test");
-    expect(assistant!.toolUses).toEqual([{ id: "t1", tool: "bash", input: { cmd: "cat big.log" } }]);
+    expect(assistant!.toolUses).toEqual([
+      { id: "t1", tool: "bash", input: { cmd: "cat big.log" } },
+    ]);
     expect(result!.toolResults).toEqual([{ id: "t1", text: "ok" }]);
   });
 
   it("accepts the alternate tool_call/toolName/args spelling", () => {
     const [m] = flatten([
-      { role: "assistant", content: [{ type: "tool_call", toolCallId: "c9", toolName: "read", args: { p: "a" } }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_call", toolCallId: "c9", toolName: "read", args: { p: "a" } }],
+      },
     ]);
     expect(m!.toolUses).toEqual([{ id: "c9", tool: "read", input: { p: "a" } }]);
   });
 
   it("joins array-form tool_result content and ignores unknown block types", () => {
     const [m] = flatten([
-      { role: "user", content: [{ type: "thing" }, { type: "tool_result", tool_use_id: "a", content: [{ text: "x" }, "y"] }] },
+      {
+        role: "user",
+        content: [
+          { type: "thing" },
+          { type: "tool_result", tool_use_id: "a", content: [{ text: "x" }, "y"] },
+        ],
+      },
     ]);
     expect(m!.toolResults).toEqual([{ id: "a", text: "x\ny" }]);
   });
@@ -68,8 +79,14 @@ describe("collectCalls", () => {
 
   it("keeps a call with no result, but never invents one for an orphan result", () => {
     const msgs = flatten([
-      { role: "assistant", content: [{ type: "tool_use", id: "no-result", name: "bash", input: {} }] },
-      { role: "user", content: [{ type: "tool_result", tool_use_id: "orphan", content: "nobody asked" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "no-result", name: "bash", input: {} }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "orphan", content: "nobody asked" }],
+      },
     ]);
     const calls = collectCalls(msgs);
     expect(calls.map((c) => c.id)).toEqual(["no-result"]);
@@ -99,7 +116,9 @@ describe("buildCompactState", () => {
   });
 
   it("truncates an oversized assistant text instead of dropping it", () => {
-    const [m] = flatten([{ role: "assistant", content: [{ type: "text", text: "z".repeat(5000) }] }]);
+    const [m] = flatten([
+      { role: "assistant", content: [{ type: "text", text: "z".repeat(5000) }] },
+    ]);
     const state = JSON.stringify(buildCompactState([m!], []));
     expect(state).toContain("...[truncated]...");
     expect(state.length).toBeLessThan(4500);
@@ -226,7 +245,11 @@ describe("planCompaction", () => {
       effective: base,
     });
     if (out.kind !== "compacted") throw new Error("expected compaction");
-    expect(out.plan.decisions[0]).toMatchObject({ keepCall: 0.33, keepResult: 0.11, action: "drop_result" });
+    expect(out.plan.decisions[0]).toMatchObject({
+      keepCall: 0.33,
+      keepResult: 0.11,
+      action: "drop_result",
+    });
   });
 
   it("honours a custom truncate head", async () => {

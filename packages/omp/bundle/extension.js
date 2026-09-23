@@ -66,7 +66,10 @@ var BUILTIN_REDACT_PATTERNS = [
 ];
 function redactText(text, opts = {}) {
   let out = text;
-  const patterns = opts.extra?.length ? [...BUILTIN_REDACT_PATTERNS, ...opts.extra.map((p) => ({ label: "custom", pattern: p }))] : BUILTIN_REDACT_PATTERNS;
+  const patterns = opts.extra?.length ? [
+    ...BUILTIN_REDACT_PATTERNS,
+    ...opts.extra.map((p) => ({ label: "custom", pattern: p }))
+  ] : BUILTIN_REDACT_PATTERNS;
   for (const { label, pattern, replace } of patterns) {
     out = out.replace(pattern, replace ?? `${PLACEHOLDER}:${label}]`);
   }
@@ -94,7 +97,10 @@ function walk(value, depth, opts) {
     return redactText(value.toISOString(), opts);
   }
   if (value instanceof Map) {
-    return Array.from(value.entries(), ([k, v]) => [walk(k, depth + 1, opts), walk(v, depth + 1, opts)]);
+    return Array.from(value.entries(), ([k, v]) => [
+      walk(k, depth + 1, opts),
+      walk(v, depth + 1, opts)
+    ]);
   }
   if (value instanceof Set) {
     return Array.from(value, (v) => walk(v, depth + 1, opts));
@@ -142,7 +148,9 @@ function validateQuestions(questions) {
     if (!q || typeof q !== "object")
       throw new JevError(`question "${key}" must be an object`, { retryable: false });
     if (!q.instructions || typeof q.instructions !== "string") {
-      throw new JevError(`question "${key}" needs a non-empty instructions string`, { retryable: false });
+      throw new JevError(`question "${key}" needs a non-empty instructions string`, {
+        retryable: false
+      });
     }
     if (q.type === "choice") {
       const n = Object.keys(q.criteria ?? {}).length;
@@ -153,7 +161,9 @@ function validateQuestions(questions) {
       if (n < 2)
         throw new JevError(`score "${key}" needs at least 2 ordered levels`, { retryable: false });
     } else if (q.type !== "noul") {
-      throw new JevError(`question "${key}" has unknown type "${q.type}"`, { retryable: false });
+      throw new JevError(`question "${key}" has unknown type "${q.type}"`, {
+        retryable: false
+      });
     }
   }
 }
@@ -193,7 +203,10 @@ async function askJev(config, state, questions, signal) {
       });
       if (res.status === 429 || res.status >= 500) {
         const text = await res.text().catch(() => "");
-        lastError = new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 300)}`, { status: res.status, retryable: true });
+        lastError = new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 300)}`, {
+          status: res.status,
+          retryable: true
+        });
         if (attempt < cfg.maxAttempts) {
           cfg.onRetry?.(attempt, lastError);
           await sleep(250 * attempt * attempt);
@@ -203,7 +216,10 @@ async function askJev(config, state, questions, signal) {
       }
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 500)}`, { status: res.status, retryable: false });
+        throw new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 500)}`, {
+          status: res.status,
+          retryable: false
+        });
       }
       let parsed;
       const raw = await res.text();
@@ -412,7 +428,9 @@ GOAL: ${input.goal.slice(0, 1e3)}`,
     if (eligible.some((e) => e.index === "none")) {
       throw new JevError('chooseBrowserAction: "none" is reserved for the no-target escape; rename the element index', { retryable: false });
     }
-    const targetCriteria = { none: "Do not target any element for this operation." };
+    const targetCriteria = {
+      none: "Do not target any element for this operation."
+    };
     for (const e of eligible)
       targetCriteria[e.index] = [e.label, e.role, e.value].filter(Boolean).join(" | ");
     questions[op2.toLowerCase() + "_target"] = {
@@ -447,13 +465,21 @@ async function pickTool(config, input, options = {}) {
   if (input.tools.length === 0)
     return { tool: null, confidence: 0, risky: 0, confirmRequired: false, act: false };
   if (input.tools.some((t) => t.name === "none")) {
-    throw new JevError('pickTool: "none" is reserved for the abstain option; rename the tool', { retryable: false });
+    throw new JevError('pickTool: "none" is reserved for the abstain option; rename the tool', {
+      retryable: false
+    });
   }
-  const criteria = { none: "No listed tool is appropriate; answer or ask the user instead." };
+  const criteria = {
+    none: "No listed tool is appropriate; answer or ask the user instead."
+  };
   for (const t of input.tools)
     criteria[t.name] = t.description;
   const response = await askJev(config, { task: input.task, context: input.context ?? "", tools: input.tools }, {
-    tool: { type: "choice", instructions: "Which single tool best accomplishes the task?", criteria },
+    tool: {
+      type: "choice",
+      instructions: "Which single tool best accomplishes the task?",
+      criteria
+    },
     risky: {
       type: "noul",
       instructions: "Does invoking the chosen tool carry side effects that warrant explicit user confirmation (writes, deletes, network mutations, spending)?"
@@ -462,7 +488,13 @@ async function pickTool(config, input, options = {}) {
   const picked = choice(response, "tool");
   const risky = noul(response, "risky");
   const act = !!picked.choice && picked.choice !== "none" && picked.confidence >= minConfidence;
-  return { tool: picked.choice ?? null, confidence: picked.confidence, risky, confirmRequired: risky >= riskThreshold, act };
+  return {
+    tool: picked.choice ?? null,
+    confidence: picked.confidence,
+    risky,
+    confirmRequired: risky >= riskThreshold,
+    act
+  };
 }
 
 // ../core/dist/budget.js
@@ -590,7 +622,12 @@ function createDecisionLog(opts = {}) {
         else
           disagreements.push({ digest: mine.digest, kind: mine.kind, a: mine, b: theirs });
       }
-      return { matched, agreed, flipRate: matched === 0 ? 0 : disagreements.length / matched, disagreements };
+      return {
+        matched,
+        agreed,
+        flipRate: matched === 0 ? 0 : disagreements.length / matched,
+        disagreements
+      };
     }
   };
 }
@@ -636,7 +673,11 @@ function createPersistentCache(opts) {
       rows.sort((a, b) => a[1].seq - b[1].seq);
       for (const [key, entry] of rows) {
         if (typeof entry?.expiresAt === "number" && entry.expiresAt > now && entry.response) {
-          entries.set(key, { response: entry.response, expiresAt: entry.expiresAt, seq: entry.seq });
+          entries.set(key, {
+            response: entry.response,
+            expiresAt: entry.expiresAt,
+            seq: entry.seq
+          });
           nextSeq = Math.max(nextSeq, entry.seq + 1);
         }
       }
@@ -837,7 +878,13 @@ function collectCalls(msgs) {
   for (const m of msgs) {
     for (const u of m.toolUses) {
       if (u.id && !byId.has(u.id)) {
-        byId.set(u.id, { id: u.id, tool: u.tool, input: u.input, resultChars: 0, resultText: null });
+        byId.set(u.id, {
+          id: u.id,
+          tool: u.tool,
+          input: u.input,
+          resultChars: 0,
+          resultText: null
+        });
       }
     }
     for (const r of m.toolResults) {
@@ -917,7 +964,11 @@ async function planCompaction(prep) {
   const state = buildCompactState(flat);
   const stateTokens = estimateTokens(JSON.stringify(state));
   if (stateTokens > prep.effective.maxStateTokens) {
-    return { kind: "defer", reason: "state-too-large", detail: { stateTokens, maxStateTokens: prep.effective.maxStateTokens } };
+    return {
+      kind: "defer",
+      reason: "state-too-large",
+      detail: { stateTokens, maxStateTokens: prep.effective.maxStateTokens }
+    };
   }
   const batches = batchCompactCalls(calls, stateTokens, prep.effective.maxRequestTokens);
   const answers = /* @__PURE__ */ new Map();
@@ -1074,7 +1125,11 @@ function jevExtension(pi) {
         operations: z.array(z.string()).describe("Operations this element supports, e.g. ['CLICK','TYPE_TEXT'].")
       })).describe("Numbered interactive elements from the current snapshot."),
       page: z.object({ url: z.string(), title: z.string().optional(), text: z.string().optional() }).describe("Current page context."),
-      recent_actions: z.array(z.object({ action: z.string(), kind: z.string().optional(), page_changed: z.boolean().optional() })).optional().describe("Last few actions taken.")
+      recent_actions: z.array(z.object({
+        action: z.string(),
+        kind: z.string().optional(),
+        page_changed: z.boolean().optional()
+      })).optional().describe("Last few actions taken.")
     }),
     loadMode: "discoverable",
     approval: "read",
@@ -1141,7 +1196,9 @@ function jevExtension(pi) {
         ts: (/* @__PURE__ */ new Date()).toISOString(),
         kind: "omp_gate",
         model: cfg.model ?? "unknown",
-        digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, ["destructive"]),
+        digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, [
+          "destructive"
+        ]),
         answers: { destructive: verdict.destructive },
         threshold: GATE_THRESHOLD,
         action: verdict.blocked ? "block" : "allow",
@@ -1170,7 +1227,10 @@ function jevExtension(pi) {
         return;
       let roster = [];
       try {
-        roster = (ctx?.skills ?? []).map((s) => ({ name: String(s?.name ?? ""), description: String(s?.description ?? "") })).filter((s) => s.name !== "");
+        roster = (ctx?.skills ?? []).map((s) => ({
+          name: String(s?.name ?? ""),
+          description: String(s?.description ?? "")
+        })).filter((s) => s.name !== "");
       } catch {
         roster = [];
       }
@@ -1260,7 +1320,9 @@ function jevExtension(pi) {
       };
     } catch (err) {
       try {
-        pi.logger.warn("jev_compact failed, falling back to native compaction", { error: String(err) });
+        pi.logger.warn("jev_compact failed, falling back to native compaction", {
+          error: String(err)
+        });
       } catch {
       }
       return;

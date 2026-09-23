@@ -232,7 +232,8 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
   switch (name) {
     case "jev_ask": {
       const questions = asRecord(args.questions, "questions");
-      const model = typeof args.model === "string" && args.model.length > 0 ? { model: args.model } : {};
+      const model =
+        typeof args.model === "string" && args.model.length > 0 ? { model: args.model } : {};
       return askJev(resolveJevConfig(model), args.state, questions as unknown as Questions);
     }
     case "jev_models": {
@@ -306,19 +307,16 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       const recentActions = Array.isArray(args.recentActions)
         ? (args.recentActions as Array<{ action: string; kind?: string; pageChanged?: boolean }>)
         : undefined;
-      return chooseBrowserAction(
-        resolveJevConfig(),
-        {
-          goal,
-          page: {
-            url,
-            title: typeof pageRec.title === "string" ? pageRec.title : undefined,
-            text: typeof pageRec.text === "string" ? pageRec.text : undefined,
-          },
-          elements,
-          recentActions,
+      return chooseBrowserAction(resolveJevConfig(), {
+        goal,
+        page: {
+          url,
+          title: typeof pageRec.title === "string" ? pageRec.title : undefined,
+          text: typeof pageRec.text === "string" ? pageRec.text : undefined,
         },
-      );
+        elements,
+        recentActions,
+      });
     }
     case "jev_rank": {
       const task = reqString(args, "task");

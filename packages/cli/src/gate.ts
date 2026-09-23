@@ -54,11 +54,13 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         options.help = true;
         break;
       case "-c":
-      case "--criteria":
+      case "--criteria": {
         const raw = argv[++i];
-                if (raw === undefined || raw.trim() === "") return { ok: false, error: arg + " requires a value" };
-                options.criteria = raw;
+        if (raw === undefined || raw.trim() === "")
+          return { ok: false, error: arg + " requires a value" };
+        options.criteria = raw;
         break;
+      }
       case "-p":
       case "--min-prob":
       case "--threshold": {
@@ -66,7 +68,8 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         if (raw === undefined) return { ok: false, error: arg + " requires a value" };
         if (raw.trim() === "") return { ok: false, error: arg + " requires a value" };
         const n = Number(raw);
-        if (!Number.isFinite(n)) return { ok: false, error: arg + " expects a number, got '" + raw + "'" };
+        if (!Number.isFinite(n))
+          return { ok: false, error: arg + " expects a number, got '" + raw + "'" };
         options.threshold = n;
         break;
       }
@@ -117,9 +120,15 @@ export function realSources(): GateSources {
   return {
     diff: () => {
       try {
-        const head = execSync("git diff HEAD", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+        const head = execSync("git diff HEAD", {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
         if (head.trim()) return head;
-        const staged = execSync("git diff --cached", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+        const staged = execSync("git diff --cached", {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
         return staged.trim() ? staged : null;
       } catch {
         return null;

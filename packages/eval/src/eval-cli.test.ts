@@ -62,14 +62,17 @@ describe("runEvalCli exit codes", () => {
     const path = await datasetFile();
     // Unreachable API: retries surface as per-case failures, never a throw.
     const fail = sinks();
-    const failingFetch = (async () => new Response("boom", { status: 500 })) as unknown as typeof fetch;
+    const failingFetch = (async () =>
+      new Response("boom", { status: 500 })) as unknown as typeof fetch;
     const realFetch = globalThis.fetch;
     (globalThis as { fetch: typeof fetch }).fetch = failingFetch;
     try {
       expect(await runEvalCli(["--dataset", path, "--no-sweep"], fail.io)).toBe(1);
       expect(fail.read().err).toMatch(/case\(s\) failed/);
       const exploratory = sinks();
-      expect(await runEvalCli(["--dataset", path, "--no-sweep", "--no-fail"], exploratory.io)).toBe(0);
+      expect(await runEvalCli(["--dataset", path, "--no-sweep", "--no-fail"], exploratory.io)).toBe(
+        0,
+      );
     } finally {
       globalThis.fetch = realFetch;
     }

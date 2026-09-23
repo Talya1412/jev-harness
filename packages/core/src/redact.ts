@@ -79,7 +79,10 @@ export const BUILTIN_REDACT_PATTERNS: RedactPattern[] = [
 export function redactText(text: string, opts: RedactOptions = {}): string {
   let out = text;
   const patterns = opts.extra?.length
-    ? [...BUILTIN_REDACT_PATTERNS, ...opts.extra.map((p): RedactPattern => ({ label: "custom", pattern: p }))]
+    ? [
+        ...BUILTIN_REDACT_PATTERNS,
+        ...opts.extra.map((p): RedactPattern => ({ label: "custom", pattern: p })),
+      ]
     : BUILTIN_REDACT_PATTERNS;
   for (const { label, pattern, replace } of patterns) {
     out = out.replace(pattern, replace ?? `${PLACEHOLDER}:${label}]`);
@@ -116,7 +119,10 @@ function walk(value: unknown, depth: number, opts: RedactOptions): unknown {
     return redactText(value.toISOString(), opts);
   }
   if (value instanceof Map) {
-    return Array.from(value.entries(), ([k, v]) => [walk(k, depth + 1, opts), walk(v, depth + 1, opts)]);
+    return Array.from(value.entries(), ([k, v]) => [
+      walk(k, depth + 1, opts),
+      walk(v, depth + 1, opts),
+    ]);
   }
   if (value instanceof Set) {
     return Array.from(value, (v) => walk(v, depth + 1, opts));

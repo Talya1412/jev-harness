@@ -11,12 +11,12 @@ Fail-open by design: with no API key, the commands only explain — nothing is e
 
 `Code` → `Settings` → search `jev-harness`:
 
-| setting | default | notes |
-|---|---|---|
-| `jev-harness.apiKey` | `""` | TypeSafe key. Falls back to `TYPESAFE_API_KEY`. |
-| `jev-harness.baseUrl` | `https://api.typesafe.ai` | Point at a proxy if your network requires it. |
-| `jev-harness.model` | `jev-latest` | |
-| `jev-harness.threshold` | `0.75` | Destructive-gate threshold. |
+| setting                 | default                   | notes                                           |
+| ----------------------- | ------------------------- | ----------------------------------------------- |
+| `jev-harness.apiKey`    | `""`                      | TypeSafe key. Falls back to `TYPESAFE_API_KEY`. |
+| `jev-harness.baseUrl`   | `https://api.typesafe.ai` | Point at a proxy if your network requires it.   |
+| `jev-harness.model`     | `jev-latest`              |                                                 |
+| `jev-harness.threshold` | `0.75`                    | Destructive-gate threshold.                     |
 
 ## Run from source (dev)
 

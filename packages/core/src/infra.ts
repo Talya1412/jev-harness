@@ -8,13 +8,7 @@
  * same separation AGENTS.md enforces for patterns.
  */
 import { askJev, validateQuestions } from "./client.js";
-import type {
-  Answer,
-  JevConfig,
-  JevResponse,
-  Question,
-  Questions,
-} from "./types.js";
+import type { Answer, JevConfig, JevResponse, Question, Questions } from "./types.js";
 import type { SkillCandidate } from "./patterns.js";
 
 // ----------------------------- caching -----------------------------
@@ -107,16 +101,26 @@ export function jevBatch(config: JevConfig, state: unknown, signal?: AbortSignal
 
     try {
       const merged: Record<string, Question> = {};
-      const maps = snapshot.map((s, i): { prefix: string; orig: string[]; resolve: Pending["resolve"]; reject: Pending["reject"] } => {
-        const prefix = `c${i}__`;
-        const orig: string[] = [];
-        for (const [k, q] of Object.entries(s.questions)) {
-          const nk = prefix + k;
-          merged[nk] = q as Question;
-          orig.push(k);
-        }
-        return { prefix, orig, resolve: s.resolve, reject: s.reject };
-      });
+      const maps = snapshot.map(
+        (
+          s,
+          i,
+        ): {
+          prefix: string;
+          orig: string[];
+          resolve: Pending["resolve"];
+          reject: Pending["reject"];
+        } => {
+          const prefix = `c${i}__`;
+          const orig: string[] = [];
+          for (const [k, q] of Object.entries(s.questions)) {
+            const nk = prefix + k;
+            merged[nk] = q as Question;
+            orig.push(k);
+          }
+          return { prefix, orig, resolve: s.resolve, reject: s.reject };
+        },
+      );
       const response = await askJev(config, state, merged as unknown as Questions, signal);
       for (const { prefix, orig, resolve } of maps) {
         const answers: Record<string, Answer> = {};
@@ -197,7 +201,9 @@ export interface AuditLog {
  * "advisory" outputs feed a process that can be audited. In-memory by default;
  * pass a `sink` to mirror to a file, OTel, or your DB.
  */
-export function createAuditLog(opts: { sink?: (e: AuditEntry) => void; maxEntries?: number } = {}): AuditLog {
+export function createAuditLog(
+  opts: { sink?: (e: AuditEntry) => void; maxEntries?: number } = {},
+): AuditLog {
   const maxEntries = Math.max(1, opts.maxEntries ?? 1000);
   const entries: AuditEntry[] = [];
   return {
@@ -232,7 +238,9 @@ export function withAudit(config: JevConfig, log: AuditLog): JevConfig {
     const u = String(url);
     let body: { state?: unknown; questions?: Questions } | undefined;
     try {
-      body = init?.body ? (JSON.parse(String(init.body)) as { state?: unknown; questions?: Questions }) : undefined;
+      body = init?.body
+        ? (JSON.parse(String(init.body)) as { state?: unknown; questions?: Questions })
+        : undefined;
     } catch {
       body = undefined;
     }
@@ -299,7 +307,10 @@ function overlap(a: Set<string>, b: Set<string>): number {
  *   try { return await routeSkill(config, msg, skills); }
  *   catch { return localRouteSkill(msg, skills); }
  */
-export function localRouteSkill(message: string, skills: SkillCandidate[]): { skill: string | null; score: number } {
+export function localRouteSkill(
+  message: string,
+  skills: SkillCandidate[],
+): { skill: string | null; score: number } {
   const m = tokenize(message);
   let best: { name: string; score: number } | null = null;
   for (const s of skills.slice(0, 50)) {

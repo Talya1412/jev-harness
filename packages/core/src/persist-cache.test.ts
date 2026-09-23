@@ -63,7 +63,10 @@ describe("createPersistentCache", () => {
   it("survives a corrupt cache file by starting fresh", () => {
     const first = createPersistentCache({ dir });
     first.set("k", resp(0.4));
-    const raw = JSON.parse(readFileSync(join(dir, "jev-cache.json"), "utf8")) as Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(join(dir, "jev-cache.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
     raw.entries = "not-an-object";
     writeFileSync(join(dir, "jev-cache.json"), JSON.stringify(raw), "utf8");
     const second = createPersistentCache({ dir });
@@ -87,9 +90,21 @@ describe("createPersistentCache", () => {
       return new Response(JSON.stringify(resp(0.5)), { status: 200 });
     }) as unknown as typeof fetch;
     const cfg = withPersistentCache({ apiKey: "k", fetchImpl }, createPersistentCache({ dir }));
-    const stream = () => new ReadableStream({ start: (c) => { c.enqueue(new TextEncoder().encode("{}")); c.close(); } });
-    await cfg.fetchImpl!("https://api.typesafe.ai/v1/systemone", { method: "POST", body: stream() as unknown as BodyInit });
-    await cfg.fetchImpl!("https://api.typesafe.ai/v1/systemone", { method: "POST", body: stream() as unknown as BodyInit });
+    const stream = () =>
+      new ReadableStream({
+        start: (c) => {
+          c.enqueue(new TextEncoder().encode("{}"));
+          c.close();
+        },
+      });
+    await cfg.fetchImpl!("https://api.typesafe.ai/v1/systemone", {
+      method: "POST",
+      body: stream() as unknown as BodyInit,
+    });
+    await cfg.fetchImpl!("https://api.typesafe.ai/v1/systemone", {
+      method: "POST",
+      body: stream() as unknown as BodyInit,
+    });
     // Both went to transport (no collapsed "[object ReadableStream]" cache hit).
     expect(calls).toBe(2);
   });

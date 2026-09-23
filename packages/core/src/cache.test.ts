@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { stableStringify, fnv1a, createJevCache, createCachedClient, createCoalescer } from "../src/cache.js";
+import {
+  stableStringify,
+  fnv1a,
+  createJevCache,
+  createCachedClient,
+  createCoalescer,
+} from "../src/cache.js";
 import { JevError } from "../src/types.js";
 import type { JevResponse } from "../src/types.js";
 
@@ -20,7 +26,9 @@ const noulQ = { type: "noul", instructions: "?" } as const;
 
 describe("stableStringify", () => {
   it("is invariant under key order", () => {
-    expect(stableStringify({ a: 1, b: { c: 2, d: 3 } })).toBe(stableStringify({ b: { d: 3, c: 2 }, a: 1 }));
+    expect(stableStringify({ a: 1, b: { c: 2, d: 3 } })).toBe(
+      stableStringify({ b: { d: 3, c: 2 }, a: 1 }),
+    );
   });
 
   it("distinguishes different states", () => {
@@ -117,10 +125,7 @@ describe("createCoalescer", () => {
   it("keeps different states in separate requests", async () => {
     const { impl, bodies } = echoFetch();
     const client = createCoalescer({ apiKey: "k", fetchImpl: impl }, { windowMs: 5 });
-    await Promise.all([
-      client.ask({ s: 1 }, { a: noulQ }),
-      client.ask({ s: 2 }, { b: noulQ }),
-    ]);
+    await Promise.all([client.ask({ s: 1 }, { a: noulQ }), client.ask({ s: 2 }, { b: noulQ })]);
     expect(bodies).toHaveLength(2);
     expect(client.requestCount()).toBe(2);
   });
@@ -128,8 +133,12 @@ describe("createCoalescer", () => {
   it("rejects non-object questions at ask() time with a usage error", async () => {
     const { impl, bodies } = echoFetch();
     const client = createCoalescer({ apiKey: "k", fetchImpl: impl }, { windowMs: 5 });
-    await expect(client.ask({ s: 1 }, null as unknown as Parameters<typeof client.ask>[1])).rejects.toThrow(JevError);
-    await expect(client.ask({ s: 1 }, {} as Parameters<typeof client.ask>[1])).rejects.toThrow(/non-empty/);
+    await expect(
+      client.ask({ s: 1 }, null as unknown as Parameters<typeof client.ask>[1]),
+    ).rejects.toThrow(JevError);
+    await expect(client.ask({ s: 1 }, {} as Parameters<typeof client.ask>[1])).rejects.toThrow(
+      /non-empty/,
+    );
     // No request was ever issued for the invalid calls.
     await new Promise((r) => setTimeout(r, 20));
     expect(bodies).toHaveLength(0);

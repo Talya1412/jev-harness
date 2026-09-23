@@ -7,12 +7,18 @@
  * behavior are testable without a network. The GH-Action entrypoint
  * (`./action.js`) only does process I/O.
  */
-import { judgeDestructive, routeSkill, triageUrgency, } from "@jev-harness/core";
+import { judgeDestructive, routeSkill, triageUrgency } from "@jev-harness/core";
 export const DEFAULT_REVIEWERS = [
     { name: "auto", description: "No human review needed; trivial or well-tested change." },
     { name: "peer", description: "Normal code review by a teammate." },
-    { name: "security", description: "Security review: touches auth, crypto, secrets, or untrusted input." },
-    { name: "perf", description: "Performance review: hot path, allocation, or scaling-sensitive change." },
+    {
+        name: "security",
+        description: "Security review: touches auth, crypto, secrets, or untrusted input.",
+    },
+    {
+        name: "perf",
+        description: "Performance review: hot path, allocation, or scaling-sensitive change.",
+    },
 ];
 /**
  * Run the three decisions in parallel and build the comment. Each decision is
@@ -45,10 +51,20 @@ export async function runReview(config, input, signal) {
     const degraded = failures.length > 0;
     const error = failures.length > 0
         ? failures
-            .map((r, i) => "decision " + i + ": " + (r.reason instanceof Error ? r.reason.message : String(r.reason)))
+            .map((r, i) => "decision " +
+            i +
+            ": " +
+            (r.reason instanceof Error
+                ? r.reason.message
+                : String(r.reason)))
             .join("; ")
         : undefined;
-    return { decisions, comment: buildReviewComment({ decisions, title: input.title, degraded, error }), degraded, error };
+    return {
+        decisions,
+        comment: buildReviewComment({ decisions, title: input.title, degraded, error }),
+        degraded,
+        error,
+    };
 }
 /** Render the PR comment as GitHub-flavored markdown. Pure. */
 export function buildReviewComment(input) {

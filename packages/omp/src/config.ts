@@ -22,7 +22,7 @@ export function readConfig(env: Env, modelOverride?: string, redact?: boolean): 
   const apiKey = (env.TYPESAFE_API_KEY ?? "").trim();
   if (!apiKey) {
     throw new Error(
-      "TYPESAFE_API_KEY is not set. Export it in your shell or add it to your harness env file."
+      "TYPESAFE_API_KEY is not set. Export it in your shell or add it to your harness env file.",
     );
   }
   const timeoutRaw = (env.JEV_TIMEOUT_MS ?? "").trim();
