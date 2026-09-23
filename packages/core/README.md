@@ -53,7 +53,7 @@ score(res, "risk").score; // 2.02
 | Function                                                  | Purpose                                                                                         |
 | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `routeSkill(config, message, skills, opts?)`              | Pick the right skill for a request. Pass descriptions.                                          |
-| `judgeDestructive(config, call, opts?)`                   | Whether a tool call destroys data. Default threshold 0.75.                                      |
+| `judgeDestructive(config, call, opts?)`                   | Whether a tool call destroys data. Default threshold 0.5.                                       |
 | `chooseBrowserAction(config, input, opts?)`               | One browser action from a numbered element table. Advisory.                                     |
 | `pickTool(config, input, opts?)`                          | One tool from a candidate set, with a confirmation flag.                                        |
 | `rankCandidates(config, task, candidates, opts?)`         | Score a list best-first.                                                                        |

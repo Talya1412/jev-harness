@@ -7,7 +7,7 @@
  * it can be tested without spawning a process.
  */
 import type { SkillCandidate } from "@jev-harness/core";
-export declare const DEFAULT_DESTRUCTIVE_THRESHOLD = 0.75;
+export declare const DEFAULT_DESTRUCTIVE_THRESHOLD = 0.5;
 export declare const DEFAULT_SKILL_CONFIDENCE = 0.5;
 export declare const MIN_PROMPT_CHARS = 1;
 /**

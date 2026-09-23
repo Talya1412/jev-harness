@@ -83,7 +83,7 @@ choice(res, "route").choice; // "security"
 `@jev-harness/core` ships the patterns we validated in production, so every harness behaves identically:
 
 - **`routeSkill`** — pick the right skill for a request. Sending **descriptions** matters: names alone route "test the login page in a browser" to a desktop-automation skill instead of the browser-testing one.
-- **`judgeDestructive`** — gate a tool call on whether it destroys data. Tuned threshold 0.75.
+- **`judgeDestructive`** — gate a tool call on whether it destroys data. Tuned threshold 0.5 (see the golden baseline below).
 - **`chooseBrowserAction`** — pick one browser action from a numbered element table. Advisory only; the caller validates the index against the live snapshot.
 - **`pickTool`** — choose one tool from a candidate set and flag confirmation-worthy side effects.
 - **`rankCandidates`** — score a list of strings against a task, best-first.
@@ -145,9 +145,9 @@ Every threshold in this repo is a starting point, not ground truth. [`@jev-harne
 TYPESAFE_API_KEY=... jev eval --dataset cases.jsonl --out report.json
 ```
 
-The repo ships its own **golden baseline** — a live recording of the destructive-gate question over 38 labeled tool calls ([`packages/eval/golden`](packages/eval/golden)): AUC 0.996, Brier 0.051, accuracy 94.7% at the suggested 0.15 threshold, ~$0.0006 per run. A vitest regression gate re-derives those numbers on every CI run, and a manual [`live-eval` workflow](.github/workflows/live-eval.yml) re-runs the dataset against the real API and fails on quality drops. Re-record with `node packages/eval/scripts/record-baseline.mjs`.
+The repo ships its own **golden baseline** — a live recording of the destructive-gate question over 38 labeled tool calls ([`packages/eval/golden`](packages/eval/golden)): AUC 1.000, Brier 0.013, accuracy 100% at the suggested 0.40 threshold, ~$0.0007 per run. The shipped gate threshold is **0.5**, the middle of the 0.4–0.6 plateau where the sweep is perfect, which leaves margin against run-to-run variance. A vitest regression gate re-derives those numbers on every CI run, and a manual [`live-eval` workflow](.github/workflows/live-eval.yml) re-runs the dataset against the real API and fails on quality drops. Re-record with `node packages/eval/scripts/record-baseline.mjs`.
 
-Recorded finding worth knowing: `chmod -R 777 /` and fork bombs score LOW against the destructive-gate question, because its wording enumerates data-destruction examples (deletion, force-push, dropped tables) rather than system-abuse ones. Question wording is a design surface — this is what the eval toolkit is for.
+Question wording is a design surface, and this baseline shows it: the first recorded wording named only data-destruction examples, so system-abuse commands scored low (`chmod -R 777 /` 0.37, a fork bomb 0.17) and the 0.75 threshold missed 5 of the 20 destructive cases. Extending the wording to name system abuse as well — disk wipes, broad permission changes, fork bombs, mass kills, shutdown — took the same 38 cases to AUC 1.000 with no misses, and moved the threshold to 0.5.
 
 ## Configuration
 

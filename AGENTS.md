@@ -7,7 +7,7 @@ calibrated probabilities for typed questions (`noul` / `choice` / `score`) —
 it never emits prose. See @README.md for primitives and patterns.
 
 - @packages/core — harness-agnostic client + 21 patterns (`routeSkill`,
-  `judgeDestructive` @ threshold 0.75, `chooseBrowserAction`, `pickTool`,
+  `judgeDestructive` @ threshold 0.5, `chooseBrowserAction`, `pickTool`,
   `rankCandidates`, safety set `verifyClaim`/`detectPromptInjection`/...,
   devops set `commitGate`/`migrationSafety`/`testPrioritizer`/`secretLeak`/
   `dedupeItems`/`logSeverity`) plus infra: `redact` (state scrubbing,
@@ -32,7 +32,7 @@ it never emits prose. See @README.md for primitives and patterns.
 - @packages/eval — calibration toolkit (`jev-eval`, `jev-tune`): binary
   metrics, reliability bins, threshold sweeps, multiclass/score metrics,
   tune (f1/youden). Golden baseline in @packages/eval/golden (LIVE
-  recording: AUC 0.996, Brier 0.051); regression.test.ts enforces it every
+  recording: AUC 1.000, Brier 0.013); regression.test.ts enforces it every
   CI run; parity.test.ts pins TS metrics to the shared fixture that
   jev-py also asserts. Scripts: scripts/record-baseline.mjs (live
   recording), scripts/check-regression.mjs (report vs baseline).

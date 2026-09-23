@@ -9,8 +9,12 @@ import { DEFAULT_BASE_URL, DEFAULT_MODEL, type JevConfig } from "@jev-harness/co
 
 export const DEFAULT_TIMEOUT_MS = 15_000;
 
-/** Destructive-gate cutoff. Measured: `rm -rf` scores 0.84, `git status` 0.01. */
-export const GATE_THRESHOLD = 0.75;
+/**
+ * Destructive-gate cutoff. Chosen from the labeled golden dataset: the swept
+ * optimum is a 0.4-0.6 plateau with no false positives and no false negatives,
+ * so 0.5 sits mid-margin against run-to-run variance.
+ */
+export const GATE_THRESHOLD = 0.5;
 
 /** Minimum confidence before the skill router injects a suggestion. */
 export const SKILL_MIN_CONFIDENCE = 0.5;

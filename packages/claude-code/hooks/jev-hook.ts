@@ -21,7 +21,7 @@
  * - TYPESAFE_BASE_URL       API base override (optional)
  * - TYPESAFE_DEFAULT_MODEL  model override (optional, default jev-latest)
  * - JEV_TIMEOUT_MS          per-request timeout in ms (optional)
- * - JEV_DESTRUCTIVE_THRESHOLD  block threshold (optional, default 0.75)
+ * - JEV_DESTRUCTIVE_THRESHOLD  block threshold (optional, default 0.5)
  * - JEV_SKILL_CONFIDENCE    skill advisory bar (optional, default 0.5)
  * - JEV_SKILLS_JSON         inline JSON array of { name, description }
  * - JEV_SKILLS_FILE         path to a JSON file with the same shape

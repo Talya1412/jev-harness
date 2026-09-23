@@ -6,7 +6,7 @@
  *   jev-harness.review   — run a destructive-change gate over the active
  *                          editor's content (or git diff). Shows P(destructive)
  *                          and a BLOCKED/ALLOW verdict in a webview, with a
- *                          threshold slider (default 0.75, the one true veto).
+ *                          threshold slider (default 0.5, the one true veto).
  *   jev-harness.verify   — treat the selection as a claim and the file body as
  *                          the source; run the RAG verification gate.
  *
@@ -30,7 +30,7 @@ function cfg() {
     apiKey: c.get("apiKey") || process.env.TYPESAFE_API_KEY || "",
     baseUrl: c.get("baseUrl") || DEFAULT_BASE_URL,
     model: c.get("model") || DEFAULT_MODEL,
-    threshold: c.get("threshold") ?? 0.75,
+    threshold: c.get("threshold") ?? 0.5,
   };
 }
 

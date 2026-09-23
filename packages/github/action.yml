@@ -29,7 +29,7 @@ inputs:
     required: false
     default: "true"
   destructive-threshold:
-    description: Override the destructive-block threshold (default 0.75).
+    description: Override the destructive-block threshold (default 0.5).
     required: false
 
 runs:

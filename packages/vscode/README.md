@@ -2,7 +2,7 @@
 
 Inline Jev (System One) decisions in VS Code. Two fail-open gates:
 
-- **jev: review active file for destructive changes** — runs the `judgeDestructive` gate (threshold 0.75, the one true veto) over the active editor's content and shows `P(destructive)` + a `BLOCKED` / `ALLOW` verdict in a side panel.
+- **jev: review active file for destructive changes** — runs the `judgeDestructive` gate (threshold 0.5, the one true veto) over the active editor's content and shows `P(destructive)` + a `BLOCKED` / `ALLOW` verdict in a side panel.
 - **jev: verify selection as a claim** — treats the selection as a claim and the file body as the source, runs the RAG verification gate, and shows `SUPPORTED` / `UNSUPPORTED`.
 
 Fail-open by design: with no API key, the commands only explain — nothing is ever hard-stopped.
@@ -16,7 +16,7 @@ Fail-open by design: with no API key, the commands only explain — nothing is e
 | `jev-harness.apiKey`    | `""`                      | TypeSafe key. Falls back to `TYPESAFE_API_KEY`. |
 | `jev-harness.baseUrl`   | `https://api.typesafe.ai` | Point at a proxy if your network requires it.   |
 | `jev-harness.model`     | `jev-latest`              |                                                 |
-| `jev-harness.threshold` | `0.75`                    | Destructive-gate threshold.                     |
+| `jev-harness.threshold` | `0.5`                     | Destructive-gate threshold.                     |
 
 ## Run from source (dev)
 

@@ -1,4 +1,4 @@
-export const DEFAULT_DESTRUCTIVE_THRESHOLD = 0.75;
+export const DEFAULT_DESTRUCTIVE_THRESHOLD = 0.5;
 export const DEFAULT_SKILL_CONFIDENCE = 0.5;
 export const MIN_PROMPT_CHARS = 1;
 /**

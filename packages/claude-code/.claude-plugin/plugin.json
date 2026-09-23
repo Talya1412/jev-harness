@@ -21,7 +21,7 @@
       "type": "number",
       "title": "Destructive threshold",
       "description": "Minimum Jev destructiveness probability that blocks a Bash/Write/Edit tool call.",
-      "default": 0.75
+      "default": 0.5
     },
     "skillConfidence": {
       "type": "number",

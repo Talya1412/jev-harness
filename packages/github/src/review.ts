@@ -39,7 +39,7 @@ export interface ReviewInput {
   diff: string;
   cwd?: string;
   reviewers?: ReviewerCandidate[];
-  /** Override the destructive block threshold (default 0.75, matches core). */
+  /** Override the destructive block threshold (default 0.5, matches core). */
   destructiveThreshold?: number;
 }
 

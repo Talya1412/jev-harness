@@ -44,7 +44,7 @@ test("askJev requires api key", async () => {
   );
 });
 
-test("judgeDestructive blocks at 0.75", async () => {
+test("judgeDestructive blocks at the default threshold", async () => {
   const r = await judgeDestructive(config, { tool: "bash", input: { cmd: "rm -rf dist" } });
   assert.strictEqual(r.destructive, 0.9);
   assert.strictEqual(r.blocked, true);

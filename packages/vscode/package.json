@@ -57,10 +57,10 @@
         },
         "jev-harness.threshold": {
           "type": "number",
-          "default": 0.75,
+          "default": 0.5,
           "minimum": 0,
           "maximum": 1,
-          "markdownDescription": "Destructive-gate threshold. 0.75 is tuned to be the one true veto."
+          "markdownDescription": "Destructive-gate threshold. 0.5 is tuned on the labeled golden dataset."
         }
       }
     }

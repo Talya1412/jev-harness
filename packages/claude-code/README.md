@@ -43,7 +43,7 @@ environment:
 | `TYPESAFE_BASE_URL`         | no       | core default | API base override.                                                                                                              |
 | `TYPESAFE_DEFAULT_MODEL`    | no       | `jev-latest` | Jev model override. Also settable as the `model` plugin `userConfig`.                                                           |
 | `JEV_TIMEOUT_MS`            | no       | 15000        | Per-request timeout in ms.                                                                                                      |
-| `JEV_DESTRUCTIVE_THRESHOLD` | no       | `0.75`       | `destructive` probability at or above which PreToolUse denies. Also settable as the `destructiveThreshold` plugin `userConfig`. |
+| `JEV_DESTRUCTIVE_THRESHOLD` | no       | `0.5`        | `destructive` probability at or above which PreToolUse denies. Also settable as the `destructiveThreshold` plugin `userConfig`. |
 | `JEV_SKILL_CONFIDENCE`      | no       | `0.5`        | Minimum routing confidence before the advisor speaks. Also settable as the `skillConfidence` plugin `userConfig`.               |
 | `JEV_SKILLS_JSON`           | no       | —            | Inline JSON array of `{ name, description }` skill candidates.                                                                  |
 | `JEV_SKILLS_FILE`           | no       | —            | Path to a JSON file with the same shape (used when `JEV_SKILLS_JSON` is unset).                                                 |
@@ -54,7 +54,7 @@ variables above before starting Claude Code, e.g.:
 
 ```sh
 export TYPESAFE_API_KEY="<your TypeSafe key>"
-export JEV_DESTRUCTIVE_THRESHOLD="0.75"
+export JEV_DESTRUCTIVE_THRESHOLD="0.5"
 ```
 
 With no skills configured (`JEV_SKILLS_JSON`/`JEV_SKILLS_FILE` unset or

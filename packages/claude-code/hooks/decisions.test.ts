@@ -74,7 +74,7 @@ describe("denyPayload", () => {
     expect(payload.hookSpecificOutput.permissionDecision).toBe("deny");
     expect(payload.hookSpecificOutput.permissionDecisionReason).toContain("Bash");
     expect(payload.hookSpecificOutput.permissionDecisionReason).toContain("0.84");
-    expect(payload.hookSpecificOutput.permissionDecisionReason).toContain("0.75");
+    expect(payload.hookSpecificOutput.permissionDecisionReason).toContain("0.5");
   });
 });
 
@@ -98,7 +98,7 @@ describe("skillPayload", () => {
 
 describe("defaults", () => {
   it("match the documented values", () => {
-    expect(DEFAULT_DESTRUCTIVE_THRESHOLD).toBe(0.75);
+    expect(DEFAULT_DESTRUCTIVE_THRESHOLD).toBe(0.5);
     expect(DEFAULT_SKILL_CONFIDENCE).toBe(0.5);
   });
 });

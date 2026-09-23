@@ -39,7 +39,7 @@ jobs:
 | `pr-diff`               | no       | `git diff origin/HEAD...` | Diff text to judge.                                  |
 | `reviewers`             | no       | auto/peer/security/perf   | JSON array of `{name, description}`.                 |
 | `post`                  | no       | `true`                    | `false` to only print the comment.                   |
-| `destructive-threshold` | no       | `0.75`                    | Override the destructive-block threshold.            |
+| `destructive-threshold` | no       | `0.5`                     | Override the destructive-block threshold.            |
 
 ## Output
 
