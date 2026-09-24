@@ -50,20 +50,24 @@ score(res, "risk").score; // 2.02
 
 ### Patterns
 
-| Function                                                             | Purpose                                                                                                                                                                                                                                                                                |
-| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `routeSkill(config, message, skills, opts?)`                         | Pick the right skill for a request. Pass descriptions.                                                                                                                                                                                                                                 |
-| `judgeDestructive(config, call, opts?)`                              | Whether a tool call destroys data. Default threshold 0.5.                                                                                                                                                                                                                              |
-| `chooseBrowserAction(config, input, opts?)`                          | One browser action from a numbered element table. Advisory.                                                                                                                                                                                                                            |
-| `pickTool(config, input, opts?)`                                     | One tool from a candidate set, with a confirmation flag.                                                                                                                                                                                                                               |
-| `rankCandidates(config, task, candidates, opts?)`                    | Score a list best-first.                                                                                                                                                                                                                                                               |
-| `gateInjection(config, { source, content }, opts?)`                  | Prompt-injection gate for untrusted content before it reaches the model. Default threshold 0.7.                                                                                                                                                                                        |
-| `detectPromptInjection(config, { content, role?, context? }, opts?)` | The same injection decision screened at a different point: content about to be appended to an already-trusted conversation. Default threshold 0.6. See `THRESHOLDS.detectPromptInjection`.                                                                                             |
-| `verifyStep(config, { task, report, evidence? }, opts?)`             | Did the work satisfy the task? Cheap post-hoc critic. Default threshold 0.6.                                                                                                                                                                                                           |
-| `needsClarification(config, { message, recent? }, opts?)`            | Detect a genuine ambiguity fork worth one clarifying question. Default threshold 0.5.                                                                                                                                                                                                  |
-| `isDuplicate(config, item, existing, opts?)`                         | Semantic dedup; one batched request, one `noul` per candidate. Default threshold 0.5.                                                                                                                                                                                                  |
-| `routeEffort(config, { task, context? }, opts?)`                     | Cheap-vs-expensive model routing for a task. Default threshold 0.5.                                                                                                                                                                                                                    |
-| `judgeDestructiveDual(config, call, opts?)`                          | Destructive gate with a way forward: one `noul` plus one `choice` in a single request, returning `allow` / `block` / `confirm`. `confirm` means "genuine but uncertain — re-issue with explicit user confirmation" instead of a silent hard block. Never throws on a malformed answer. |
+| Function                                                             | Purpose                                                                                                                                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `routeSkill(config, message, skills, opts?)`                         | Pick the right skill for a request. Pass descriptions.                                                                                                                                                                                                                                                                                                                                            |
+| `judgeDestructive(config, call, opts?)`                              | Whether a tool call destroys data. Default threshold 0.5.                                                                                                                                                                                                                                                                                                                                         |
+| `chooseBrowserAction(config, input, opts?)`                          | One browser action from a numbered element table. Advisory.                                                                                                                                                                                                                                                                                                                                       |
+| `pickTool(config, input, opts?)`                                     | One tool from a candidate set, with a confirmation flag.                                                                                                                                                                                                                                                                                                                                          |
+| `rankCandidates(config, task, candidates, opts?)`                    | Score a list best-first.                                                                                                                                                                                                                                                                                                                                                                          |
+| `gateInjection(config, { source, content }, opts?)`                  | Prompt-injection gate for untrusted content before it reaches the model. Default threshold 0.7.                                                                                                                                                                                                                                                                                                   |
+| `detectPromptInjection(config, { content, role?, context? }, opts?)` | The same injection decision screened at a different point: content about to be appended to an already-trusted conversation. Default threshold 0.6. See `THRESHOLDS.detectPromptInjection`.                                                                                                                                                                                                        |
+| `verifyStep(config, { task, report, evidence? }, opts?)`             | Did the work satisfy the task? Cheap post-hoc critic. Default threshold 0.6.                                                                                                                                                                                                                                                                                                                      |
+| `needsClarification(config, { message, recent? }, opts?)`            | Detect a genuine ambiguity fork worth one clarifying question. Default threshold 0.5.                                                                                                                                                                                                                                                                                                             |
+| `isDuplicate(config, item, existing, opts?)`                         | Semantic dedup; one batched request, one `noul` per candidate. Default threshold 0.5.                                                                                                                                                                                                                                                                                                             |
+| `routeEffort(config, { task, context? }, opts?)`                     | Cheap-vs-expensive model routing for a task. Default threshold 0.5.                                                                                                                                                                                                                                                                                                                               |
+| `judgeDestructiveDual(config, call, opts?)`                          | Destructive gate with a way forward: one `noul` plus one `choice` in a single request, returning `allow` / `block` / `confirm`. `confirm` means "genuine but uncertain — re-issue with explicit user confirmation" instead of a silent hard block. Never throws on a malformed answer.                                                                                                            |
+| `escalateOnLowConfidence(config, state, questions, opts)`            | One batched first pass, then a tri-state: `accepted` / `escalated` / `unresolved`. A `noul` gate uses an uncertainty band; a `choice`/`score` gate uses a confidence bar. Escalation re-asks the SAME questions to `secondConfig` or a caller `fallback` — anchor-free (no first probabilities passed, per the vendor SDE recipe), one attempt, and the first result survives every failure path. |
+| `pruneContext(config, items, opts?)`                                 | Score context items for relevance and drop the ones the model does not need: each drop returns head(300) + an omission note — the input is never mutated, so the caller always keeps the original. State-size guard first (zero requests when oversized), `error`-kind output needs a strictly lower bar to drop.                                                                                 |
+| `findingRealness(config, finding, opts?)`                            | Is this review finding worth a reviewer's time? One request: a `noul` + a `severity` re-grade choice. Missing answers return `realness: -1` (unjudged), and severity is never silently coerced — upstream maps unknown values to `low`.                                                                                                                                                           |
+| `refutationFilter(config, findings, opts?)`                          | Batched refutation of a finding set with the loss kept asymmetric: drop only at `>= refute` AND classed non-protected (`ordinary`); a missing refutation or an unproven veto always keeps.                                                                                                                                                                                                        |
 
 ```ts
 const verdict = await judgeDestructiveDual(config, { tool: "bash", input: { cmd } });
@@ -86,12 +90,47 @@ THRESHOLDS.detectPromptInjection; // 0.6 — detectPromptInjection (append-to-tr
 // without recording one and measuring the change first.
 THRESHOLDS.duplicate; // 0.5 — isDuplicate / dedupeItems / commitGate secret floor
 THRESHOLDS.categoryConfidence; // 0.5 — below this the dual gate confirms instead of blocking
+THRESHOLDS.escalateBelow; // 0.6 — escalateOnLowConfidence (choice/score bar)  PROVISIONAL
+THRESHOLDS.uncertainBandLow; // 0.3 — escalateOnLowConfidence (noul band low)  PROVISIONAL, vendor-cited
+THRESHOLDS.uncertainBandHigh; // 0.7 — ... band high
+THRESHOLDS.pruneKeep; // 0.5 — pruneContext keep bar        MEASURED cross-repo consensus
+THRESHOLDS.pruneDrop; // 0.25 — pruneContext drop bar       MEASURED cross-repo consensus
+THRESHOLDS.pruneErrorDrop; // 0.1 — error/diagnostic bars    MEASURED cross-repo consensus
+THRESHOLDS.refute; // 0.75 — refutationFilter delete bar    PROVISIONAL, deliberately high
+THRESHOLDS.findingReal; // 0.5 — findingRealness report bar  PROVISIONAL
 ```
 
 The remaining public defaults live in the same object (`verifyStep`, `clarification`,
 `effortRouting`, `browserAction`, `toolPick`, `toolRisk`, `claimSupport`,
 `contextSufficiency`, `regression`, `subagentPick`, `delegation`, `commitSafe`,
 `secretLeak`, `localRouterFloor`); every pattern keeps its per-call override.
+
+### Escalation, pruning, and review judgments
+
+Three families where the fail-open rule has a precise shape each:
+
+**Escalation is tri-state.** `accepted` (gate confident), `escalated` (second
+opinion answered — `answers` then carries the second pass), `unresolved` (no
+target, unreadable gate, or the second pass failed — `error` says which, and
+`first` is always preserved). Never count a fallback result as a selector win:
+record that escalation fired. The escalation request carries the SAME questions
+and the SAME state, never the first probabilities — anchoring is a bias, not a
+feature (vendor SDE recipe re-extracts from the original input).
+
+**Pruning is routing, not destruction.** `pruneContext` returns replacement
+text for drops and never mutates its input, so the caller holds the original
+(note id matches the candidate id for recovery). Guard order matters: oversized
+state defers with ZERO requests — a fail-open that ships a 15.8M-token request
+after the judge 400'd is worse than no judge (documented Astro-Han failure).
+Missing answers keep, the band between drop and keep keeps, and error-shaped
+output needs a much lower score to drop than ordinary output.
+
+**Review judgments keep the loss asymmetric.** `refutationFilter` exists to
+delete findings, and a false removal costs more than a false keep, so the bar
+is high (0.75, PROVISIONAL), protected subjects veto deletion even above the
+bar, and an unproven veto (missing class) keeps. `findingRealness` reports a
+finding only above its bar and marks the unjudged case (`realness: -1`)
+instead of guessing.
 
 ### Caching, coalescing, failure policy
 

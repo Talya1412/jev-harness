@@ -19,10 +19,15 @@
  * `omp models typesafe`, which is why the old `jev_ask` and `jev_models`
  * tools were removed.
  *
- * Hooks (all require 'OMP_JEV_AUTO=1', each with its own off-switch):
+ * Hooks (opt-in; default-off individually, not as a group):
  * - 'tool_call': destructive gate — dual gate with a confirm path, fail-open.
  * - 'before_agent_start': skill suggestion, delivered as a custom message.
  * - 'session_before_compact': verbatim compaction, fail-open.
+ *   (the three above require 'OMP_JEV_AUTO=1', each with its own off-switch)
+ * - 'tool_result': bulky-result pruning — behind its OWN switch
+ *   'OMP_JEV_PRUNE=1', deliberately NOT the master switch (every rewrite
+ *   invalidates the provider prompt-cache prefix from that point, so it is
+ *   opt-in only).
  *
  * Auth: TYPESAFE_API_KEY from the environment (never hardcoded, never logged).
  * Optional overrides: TYPESAFE_BASE_URL, TYPESAFE_DEFAULT_MODEL, JEV_TIMEOUT_MS.
@@ -66,6 +71,7 @@ import {
   userAlreadyChose,
   type RosterSkill,
 } from "./router.js";
+import { pruneToolResult } from "./prune.js";
 
 /** `process.env` bound once, so the pure helpers stay testable. */
 const ENV = process.env;
@@ -535,4 +541,28 @@ export default function jevExtension(pi: ExtensionAPI): void {
       return;
     }
   });
+
+  // Gate 3 — tool_result: prune a bulky result before the model reads it.
+  //
+  // Why `tool_result` and not the per-request `context` event: it is the
+  // LAST hook that sees a tool's content before the message is built, so a
+  // replacement here is exactly what the model reads — and, like the
+  // compaction hook, it never rewrites the system prompt, so the provider
+  // prompt-cache prefix stays intact for everything BEFORE the result.
+  // Why default-OFF behind its own OMP_JEV_PRUNE=1 (not OMP_JEV_AUTO): the
+  // replacement rewrites that result from the point it appears, invalidating
+  // the cache prefix from there on and costing +200-400 ms per scored result
+  // on every later turn — a tax the master switch must not levy by surprise.
+  //
+  // Fail-open: the body (prune.ts) returns undefined on every non-drop and
+  // EVERY throw, so the host always keeps the original content.
+  pi.on("tool_result", async (event: any, ctx: any) =>
+    pruneToolResult(event, ctx, {
+      env: ENV,
+      // The shared ledger — injected, never duplicated (a second ledger would
+      // split the refusal trail this file's comment documents).
+      refusals,
+      config: () => jevConfig(undefined, redactOn(ENV, "hook")),
+    }),
+  );
 }

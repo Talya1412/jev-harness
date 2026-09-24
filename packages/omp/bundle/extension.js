@@ -1114,6 +1114,91 @@ function policyForFailure(kind, error) {
   return base;
 }
 
+// ../core/dist/patterns-prune.js
+var DEFAULT_HEAD_CHARS = 300;
+var DEFAULT_MIN_CHARS = 2e3;
+var DEFAULT_MAX_ITEMS_PER_REQUEST = 64;
+var DEFAULT_MAX_STATE_TOKENS = 25e3;
+var CHARS_PER_TOKEN = 4;
+var UNJUDGED_KEEP_SCORE = 1;
+function needQuestion(kind) {
+  const base = "Judge only by this item in the state: does the conversation still need this item's full CONTENTS to continue, or can the turn proceed with a bounded preview (its id plus a short head)? Answer high (toward 1) only if the full contents are still required to continue; answer low (toward 0) if a bounded preview suffices.";
+  if (kind === "error" || kind === "diagnostic") {
+    return base + " This is error/diagnostic output: dropping live error output is how bugs hide, so hold it to a stricter standard \u2014 score low ONLY if this output is fully superseded, already acted upon, or redundant.";
+  }
+  return base;
+}
+function readNeed(response, id) {
+  const answer = response.answers[id];
+  if (!answer || answer.type !== "noul")
+    return null;
+  const n = answer.noul;
+  if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1)
+    return null;
+  return n;
+}
+function shouldDrop(score, kind, keepThreshold, dropThreshold, errorDropThreshold) {
+  const errorLike = kind === "error" || kind === "diagnostic";
+  const bar = errorLike ? errorDropThreshold : dropThreshold;
+  return score < keepThreshold && score <= bar;
+}
+function unjudgedKeep(item) {
+  return { id: item.id, keep: true, score: UNJUDGED_KEEP_SCORE, chars: item.text.length };
+}
+async function pruneContext(config, items, options) {
+  const keepThreshold = options?.keepThreshold ?? THRESHOLDS.pruneKeep;
+  const dropThreshold = options?.dropThreshold ?? THRESHOLDS.pruneDrop;
+  const errorDropThreshold = options?.errorDropThreshold ?? THRESHOLDS.pruneErrorDrop;
+  const headChars = options?.headChars ?? DEFAULT_HEAD_CHARS;
+  const minChars = options?.minChars ?? DEFAULT_MIN_CHARS;
+  const protect = options?.protect;
+  const maxItemsPerRequest = Math.max(1, options?.maxItemsPerRequest ?? DEFAULT_MAX_ITEMS_PER_REQUEST);
+  const maxStateTokens = options?.maxStateTokens ?? DEFAULT_MAX_STATE_TOKENS;
+  if (JSON.stringify(items).length / CHARS_PER_TOKEN > maxStateTokens) {
+    return { decisions: items.map(unjudgedKeep), deferred: true, reason: "state-too-large" };
+  }
+  const decisions = new Array(items.length);
+  const judged = [];
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    if (protect?.(item) || item.text.length < minChars) {
+      decisions[index] = unjudgedKeep(item);
+    } else {
+      judged.push({ index, item });
+    }
+  }
+  for (let offset = 0; offset < judged.length; offset += maxItemsPerRequest) {
+    const batch = judged.slice(offset, offset + maxItemsPerRequest);
+    const questions = {};
+    for (const { item } of batch) {
+      questions[item.id] = { type: "noul", instructions: needQuestion(item.kind) };
+    }
+    const response = await askJev(config, { items: batch.map(({ item }) => item) }, questions, options?.signal);
+    for (const { index, item } of batch) {
+      const score = readNeed(response, item.id);
+      if (score === null) {
+        decisions[index] = unjudgedKeep(item);
+        continue;
+      }
+      if (shouldDrop(score, item.kind, keepThreshold, dropThreshold, errorDropThreshold)) {
+        const omittedChars = Math.max(0, item.text.length - headChars);
+        decisions[index] = {
+          id: item.id,
+          keep: false,
+          score,
+          chars: item.text.length,
+          replacement: item.text.slice(0, headChars) + `
+[... ${omittedChars} chars omitted by jev prune; id=${item.id} \u2014 original retained by caller]`,
+          omittedChars
+        };
+      } else {
+        decisions[index] = { id: item.id, keep: true, score, chars: item.text.length };
+      }
+    }
+  }
+  return { decisions, deferred: false };
+}
+
 // ../kit/dist/config.js
 var MAX_TIMEOUT_MS = 2147483647;
 function parseTimeoutMs(raw) {
@@ -1677,6 +1762,52 @@ function skillHint(answer) {
   return "[jev] Consider loading skill: " + answer.skill + " (" + Math.round(answer.confidence * 100) + "% from the installed roster)";
 }
 
+// dist/prune.js
+var PRUNE_MARKER = "omitted by jev prune";
+var PRUNE_HARD_CAP_CHARS = 2e5;
+var PRUNE_MIN_CHARS = 2e3;
+var LOCAL_CAP_HEAD_CHARS = 15e4;
+var LOCAL_CAP_TAIL_CHARS = 4e4;
+var isText = (block) => block.type === "text";
+function replacement(text, original) {
+  return [{ type: "text", text }, ...original.filter((block) => block.type !== "text")];
+}
+function localCap(text, id) {
+  const omitted = text.length - LOCAL_CAP_HEAD_CHARS - LOCAL_CAP_TAIL_CHARS;
+  return text.slice(0, LOCAL_CAP_HEAD_CHARS) + `
+[locally capped: ${omitted} of ${text.length} chars ${PRUNE_MARKER} (oversize; no Jev call); id=${id} \u2014 original retained by host]` + text.slice(text.length - LOCAL_CAP_TAIL_CHARS);
+}
+async function pruneToolResult(event, ctx, deps) {
+  const kind = event?.isError ? "error" : "output";
+  try {
+    if ((deps.env.OMP_JEV_PRUNE ?? "").trim() !== "1")
+      return;
+    const text = (event.content ?? []).filter(isText).map((block) => block.text).join("\n");
+    if (text.includes(PRUNE_MARKER))
+      return;
+    if (text.length > PRUNE_HARD_CAP_CHARS) {
+      return {
+        content: replacement(localCap(text, String(event.toolCallId)), event.content)
+      };
+    }
+    if (text.length < PRUNE_MIN_CHARS)
+      return;
+    const outcome = await pruneContext(deps.config(), [{ id: String(event.toolCallId), text, kind }], {
+      minChars: PRUNE_MIN_CHARS,
+      signal: withDeadline(ctx?.signal, GATE_DEADLINE_MS)
+    });
+    if (outcome.deferred)
+      return;
+    const decision = outcome.decisions[0];
+    if (!decision || decision.keep || !decision.replacement)
+      return;
+    return { content: replacement(decision.replacement, event.content) };
+  } catch (err) {
+    deps.refusals.record("prune:" + kind, decideOnFailure(err, "prune").kind);
+    return;
+  }
+}
+
 // dist/extension.js
 var ENV = process.env;
 var DAY_MS = 24 * 60 * 60 * 1e3;
@@ -1945,6 +2076,13 @@ function jevExtension(pi) {
       return;
     }
   });
+  pi.on("tool_result", async (event, ctx) => pruneToolResult(event, ctx, {
+    env: ENV,
+    // The shared ledger — injected, never duplicated (a second ledger would
+    // split the refusal trail this file's comment documents).
+    refusals,
+    config: () => jevConfig(void 0, redactOn(ENV, "hook"))
+  }));
 }
 export {
   jevExtension as default,

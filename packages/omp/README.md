@@ -1,9 +1,10 @@
 # @jev-harness/omp — Jev tools + auto-hooks for Oh My Pi
 
 OMP-native adapter over `@jev-harness/core` (TypeSafe's Jev / System One).
-Registers ONE advisory tool (`jev`, three `mode`s) and 3 opt-in automatic
-hooks (4 handler registrations: the skill router uses `input` to observe the
-prompt and `before_agent_start` to deliver its hint).
+Registers ONE advisory tool (`jev`, three `mode`s) and 4 opt-in automatic
+hooks (5 handler registrations: the skill router uses `input` to observe the
+prompt and `before_agent_start` to deliver its hint; `tool_result` pruning is
+opt-in separately — it does NOT join `OMP_JEV_AUTO`).
 
 ## Install
 
@@ -34,13 +35,47 @@ tooling — the previous `jev_ask` re-implemented the native `judge()` /
 `judge_batch()` prelude available inside `eval`, and `jev_models` duplicated
 `omp models typesafe`, so both were removed.
 
-## Hooks (all require `OMP_JEV_AUTO=1`)
+## Hooks (all opt-in)
 
-| Hook                                         | Off-switch               | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Hook                                         | Switch                   | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | -------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `tool_call` destructive gate                 | `OMP_JEV_GATE=0`         | Dual gate via `judgeDestructiveDual`: one `noul` (P(destructive)) plus one `choice` over what the call actually does. `block` only when the score clears 0.5 **and** the category is `destructive` with confidence ≥ 0.5; `confirm` when the score is high but the category disagrees, abstains, or is unsure — that returns a block whose reason tells the model to re-issue the same call once the user confirms it explicitly, instead of a bare refusal with no way forward. Records every refusal in a refusal ledger. **Fail-open, twice over**: every path including the logger resolves without throwing, and the judgment is bounded by an 8 s self-deadline combined with the host's abort signal, so the handler always settles before the host's 30 s `toolCallTimeoutMs` (which maps a timeout to `{ block: true }`).                                                   |
 | `input` + `before_agent_start` skill router  | `OMP_JEV_SKILL_ROUTER=0` | Reads the skill roster from disk (the same `skills/` roots OMP's discovery scans: `.omp/skills`, `~/.omp/agent/skills`, `~/.agents/skills`) and narrows it with kit's `lexicalShortlist`, then ranks the shortlist with `routeSkill`, promoting only at confidence ≥ 0.5 **and** only when the user has not already named a skill. One request in flight (a burst is serialized, never stacked), a superseded answer is discarded rather than delivered, and answers are cached per prompt. Prompts arriving inside a ~250 ms window are coalesced; a lone prompt is never delayed, because the host awaits this hook before submitting the message. The hint is delivered as a one-shot custom message on the next `before_agent_start`, which the host converts into a developer message — the system prompt is never rewritten, so the provider prompt-cache prefix is untouched. |
 | `session_before_compact` verbatim compaction | `OMP_JEV_CONTEXT=0`      | Two `noul` questions per tool call (keep the call / keep its result verbatim), batched in parallel. Keeps bytes identical; a dropped result keeps its head verbatim plus a note naming the omitted size and how to recover it. Returns `{ compaction: { summary, shortSummary, firstKeptEntryId, tokensBefore, details } }` or `undefined` to fall back to native compaction. Fail-open, and it never hooks the per-request `context` event.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `tool_result` bulky-result pruning           | `OMP_JEV_PRUNE=1`        | Opt-in SEPARATELY from the master switch (see below): a hook on every tool result that replaces a bulky one with a verbatim head + provenance note, so the model never reads the full text. Fail-open — keep/deferred/throw all return `undefined` and the host keeps the original. Zero work and zero Jev calls unless the env var is exactly `1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |     |
+
+### `tool_result` pruning (default off — `OMP_JEV_PRUNE=1` to enable)
+
+This hook is deliberately OUTSIDE `OMP_JEV_AUTO`: enabling the master switch
+does not arm it, and disabling pruning never touches the other hooks.
+
+- **Why default-off — prompt-cache invalidation.** Every replacement rewrites
+  that tool result from the point it appears, invalidating the provider's
+  prompt-cache prefix from there on. Each scored result then costs +200-400 ms
+  to re-cache on every later turn that re-sends it — and the hook spends one
+  Jev call per bulky result even when the verdict is "keep". Opt in only if
+  bulky outputs are a real, recurring cost in your sessions.
+- **Latency.** Disabled: zero work, zero calls. Enabled, per qualifying result:
+  no call under 2000 chars; one Jev `noul` call for a bulky result, bounded by
+  an 8 s self-deadline combined with the host's abort signal — far below the
+  host's 30 s `tool_result` handler budget, so a slow Jev call can never stall
+  the turn.
+- **Hard-cap fallback.** Text over 200_000 chars is capped LOCALLY (head +
+  tail plus a `[locally capped …]` note) and never sent to Jev — an oversize
+  state makes Jev answer HTTP 400, and no request is worth a guaranteed 400.
+  A capped result carries the same idempotency marker, so it is never pruned
+  or capped twice.
+- **Recovery.** The host retains the ORIGINAL content in all cases: the hook
+  only ever returns a replacement string (verbatim head + a note naming the
+  omitted size). Every note names the result it came from: `id=<toolCallId>`
+  (for core drops, `id=` is the candidate id passed to `pruneContext`, i.e.
+  the same `toolCallId`), so the original is recoverable from the session
+  transcript or tool log by that id.
+- **Errors.** A failed tool (`isError: true`) is judged under the stricter
+  error drop bar — live error output is dropped only when Jev reads it as
+  fully spent. Any throw — transport, timeout, missing key — returns
+  `undefined` and records `prune:output` / `prune:error` in the refusal
+  ledger (`packages/omp/src/prune.test.ts` pins this).
 
 ## Environment variables
 
@@ -54,6 +89,7 @@ tooling — the previous `jev_ask` re-implemented the native `judge()` /
 | `OMP_JEV_GATE`               | on (when auto)             | Set to `0` to disable the `tool_call` gate.                                                                                                                  |
 | `OMP_JEV_SKILL_ROUTER`       | on (when auto)             | Set to `0` to disable skill routing (`input` + `before_agent_start`).                                                                                        |
 | `OMP_JEV_CONTEXT`            | on (when auto)             | Set to `0` to disable verbatim compaction.                                                                                                                   |
+| `OMP_JEV_PRUNE`              | off                        | `1` enables `tool_result` bulky-result pruning. Independent of `OMP_JEV_AUTO` — see the pruning section.                                                     |     |
 | `OMP_JEV_KEEP_THRESHOLD`     | `0.2`                      | Keep probability threshold for compaction.                                                                                                                   |
 | `OMP_JEV_MAX_STATE_TOKENS`   | `25000`                    | Compaction state budget; larger histories defer to native compaction.                                                                                        |
 | `OMP_JEV_MAX_REQUEST_TOKENS` | `30000`                    | Compaction per-request budget (drives batching).                                                                                                             |
@@ -85,7 +121,8 @@ tooling — the previous `jev_ask` re-implemented the native `judge()` /
   scores ~0.08 and would send the model after the wrong skill, while two content
   words over short descriptions score ~0.29 and are kept. Below the floor, no
   hint is produced at all — a wrong hint costs more than none.
-- **Refusal ledger.** Gate blocks, routing abstains, compaction deferrals, and
+- **Refusal ledger.** Gate blocks, routing abstains, compaction deferrals, prune failures
+  (`prune:output` / `prune:error`), and
   local fallbacks (match or no-match) are recorded with their reason, so a
   declined action leaves a trace instead of vanishing.
 - **Fail-open.** Apart from an explicit destructive `block`, no Jev failure ever
@@ -94,6 +131,7 @@ tooling — the previous `jev_ask` re-implemented the native `judge()` /
 ## Layout
 
 - `src/extension.ts` — default-export factory `(pi: ExtensionAPI) => void`; all tools + hooks.
+- `src/prune.ts` — `tool_result` pruning hook body: env gate, idempotency, local hard cap, `pruneContext` call, fail-open catch (`src/prune.test.ts`).
 - `src/compact.ts` — pure verbatim-compaction planning + rendering (no host, no network).
 - `src/router.ts` — pure skill-roster loading, the single-flight, cached ranked-merge router, and the conservative local router used on the degraded path.
 - `src/failure.ts` — the one place a Jev transport failure becomes a decision.

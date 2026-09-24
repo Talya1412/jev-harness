@@ -6,7 +6,7 @@ Monorepo of TypeSafe Jev (System One decision model) integrations. Jev returns
 calibrated probabilities for typed questions (`noul` / `choice` / `score`) —
 it never emits prose. See @README.md for primitives and patterns.
 
-- @packages/core — harness-agnostic client + 21 patterns (`routeSkill`,
+- @packages/core — harness-agnostic client + 28 patterns (`routeSkill`,
   `judgeDestructive` @ threshold 0.5, `chooseBrowserAction`, `pickTool`,
   `rankCandidates`, safety set `verifyClaim`/`detectPromptInjection`/...,
   devops set `commitGate`/`migrationSafety`/`testPrioritizer`/`secretLeak`/
@@ -15,14 +15,21 @@ it never emits prose. See @README.md for primitives and patterns.
   `createPersistentCache`/`withPersistentCache` (disk cache with hit rate),
   `createDecisionLog`/`jsonlSink`/`decisionDigest` + `compare` flip-rate,
   `withCache`/`jevBatch`/`withAudit`/`localRouteSkill`, `withFailMode`.
+  Families added 2026-09-25 (docs/superpowers/plans/2026-09-25-escalate-prune-review-patterns.md):
+  `escalateOnLowConfidence` (tri-state escalation), `pruneContext` (non-destructive
+  context pruning), `findingRealness`/`refutationFilter` (review judgments, loss-asymmetric).
   No framework imports. Built first; every adapter imports it.
-- @packages/omp — OMP extension (5 tools + 3 hooks). Ships self-contained
+- @packages/omp — OMP extension (1 tool `jev` + 5 hooks: gate, skill router,
+  verbatim compaction, `before_agent_start` hint delivery, opt-in `tool_result`
+  prune via OMP_JEV_PRUNE=1). Ships self-contained
   @packages/omp/bundle/extension.js via @packages/omp/scripts/bundle.mjs.
   Wires the budget guard (OMP_JEV_MAX_CALLS_PER_MIN, 0=off) + persistent
   cache (OMP_JEV_CACHE_DIR, OMP_JEV_CACHE_TTL_MS) into every call via
-  `jevConfig()`; redaction on for hooks, off for jev_ask (OMP_JEV_REDACT
-  1/0 forces). Gate verdicts logged when OMP_JEV_DECISION_LOG is set.
-- @packages/mcp — MCP server over stdio (7 tools), run via `jev-harness-mcp` bin.
+  `jevConfig()`; redaction on for hooks, off for the `jev` tool
+  (OMP_JEV_REDACT 1/0 forces). Gate verdicts logged when
+  OMP_JEV_DECISION_LOG is set.
+- @packages/mcp — MCP server over stdio (12 tools incl. jev_classify/jev_escalate/
+  jev_prune/jev_finding_realness/jev_refute), run via `jev-harness-mcp` bin.
 - @packages/claude-code — Claude Code plugin: PreToolUse destructive gate +
   skill routing. Ships compiled @packages/claude-code/dist + @packages/claude-code/hooks.
   Redaction on by default (JEV_REDACT=0 disables).
