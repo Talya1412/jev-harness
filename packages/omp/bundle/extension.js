@@ -1461,11 +1461,12 @@ function readSkillDir(root) {
   }
   return out;
 }
-function defaultSkillDirs(cwd, home = homedir()) {
+function defaultSkillDirs(cwd, home) {
+  const resolved = home ?? process.env.HOME ?? process.env.USERPROFILE ?? homedir();
   return [
     join2(cwd, ".omp", "skills"),
-    join2(home, ".omp", "agent", "skills"),
-    join2(home, ".agents", "skills")
+    join2(resolved, ".omp", "agent", "skills"),
+    join2(resolved, ".agents", "skills")
   ];
 }
 function loadSkillRoster(dirs) {

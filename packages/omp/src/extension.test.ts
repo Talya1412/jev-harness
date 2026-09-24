@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import jevExtension from "../src/extension.js";
@@ -395,7 +398,18 @@ describe("skill router hooks", () => {
   it("delivers a suggestion through before_agent_start, never the input result", async () => {
     setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
     const { host, handlers } = makeHost();
-    const cwd = process.cwd();
+    // A throwaway skill tree: the roster must come from disk, but which disk is
+    // the test's to choose. Relying on the developer's ambient ~/.agents/skills
+    // made this pass locally and fail on CI, where no such tree exists — an
+    // empty roster returns before it ever judges.
+    const root = mkdtempSync(join(tmpdir(), "jev-omp-skills-"));
+    const cwd = root;
+    mkdirSync(join(root, ".omp", "skills", "playwright-cli"), { recursive: true });
+    writeFileSync(
+      join(root, ".omp", "skills", "playwright-cli", "SKILL.md"),
+      "---\nname: playwright-cli\ndescription: Drive a real browser with Playwright\n---\n\nbody\n",
+      "utf8",
+    );
     jevExtension(host);
 
     vi.stubGlobal(
@@ -438,6 +452,13 @@ describe("skill router hooks", () => {
   it("stays silent when the user already named a skill", async () => {
     setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
     const { host, handlers } = makeHost();
+    const root = mkdtempSync(join(tmpdir(), "jev-omp-skills-"));
+    mkdirSync(join(root, ".omp", "skills", "fh6-modding"), { recursive: true });
+    writeFileSync(
+      join(root, ".omp", "skills", "fh6-modding", "SKILL.md"),
+      "---\nname: fh6-modding\ndescription: Forza Horizon modding\n---\n",
+      "utf8",
+    );
     jevExtension(host);
 
     const fetchSpy = vi.fn(async () => {
@@ -447,7 +468,7 @@ describe("skill router hooks", () => {
 
     const out = await handlers.get("input")!(
       { text: "/skill:fh6-modding do the thing" },
-      { cwd: process.cwd() },
+      { cwd: root },
     );
     expect(out).toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();

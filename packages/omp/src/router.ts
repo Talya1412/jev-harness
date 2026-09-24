@@ -99,11 +99,16 @@ export function readSkillDir(root: string): RosterSkill[] {
  * lose to earlier ones on a name collision, so a project can shadow a user
  * skill of the same name.
  */
-export function defaultSkillDirs(cwd: string, home = homedir()): string[] {
+export function defaultSkillDirs(cwd: string, home?: string): string[] {
+  // Honour HOME / USERPROFILE before os.homedir(): the env form is what a test
+  // can redirect, so an ambient skill tree on the developer's machine can never
+  // decide whether a test passes. CI has no ~/.agents/skills, and a test that
+  // silently depended on it failed there while passing locally.
+  const resolved = home ?? process.env.HOME ?? process.env.USERPROFILE ?? homedir();
   return [
     join(cwd, ".omp", "skills"),
-    join(home, ".omp", "agent", "skills"),
-    join(home, ".agents", "skills"),
+    join(resolved, ".omp", "agent", "skills"),
+    join(resolved, ".agents", "skills"),
   ];
 }
 
