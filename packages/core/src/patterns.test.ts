@@ -495,6 +495,10 @@ describe("routeEffort", () => {
 });
 
 describe("THRESHOLDS (frozen tuned constants)", () => {
+  it("is frozen, so a caller cannot retune it by accident", () => {
+    expect(Object.isFrozen(THRESHOLDS)).toBe(true);
+  });
+
   it("pins every value added by the escalate/prune/review pass", () => {
     // Provenance lives in the THRESHOLDS comments (MEASURED vs PROVISIONAL);
     // this test exists so a silent retune breaks CI instead of drifting.

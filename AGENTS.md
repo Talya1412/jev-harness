@@ -70,7 +70,12 @@ it never emits prose. See @README.md for primitives and patterns.
   core/src/patterns.ts) plus the dual gate's wording against
   golden/destructive-gate-dual.json. Ports `with_map_reduce`,
   `create_refusal_ledger`, `judge_destructive_dual`, and the failure taxonomy;
-  every pattern default reads the frozen `THRESHOLDS` table.
+  every pattern default reads the frozen `THRESHOLDS` table. Parity follow-up: the four
+  TypeScript-only patterns from the 2026-09-25 pass (`escalateOnLowConfidence`,
+  `pruneContext`, `findingRealness`, `refutationFilter`) are NOT ported yet —
+  their 8 threshold keys ARE in `thresholds.py` (kept in lockstep via
+  parity-thresholds.json), so only the pattern functions are missing, not the
+  numbers.
 - @packages/vscode — VS Code extension (CJS, `node --test test.js`).
 
 ## Code Style Guidelines
