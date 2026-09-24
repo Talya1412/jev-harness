@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  THRESHOLDS,
   routeSkill,
   judgeDestructive,
   pickTool,
@@ -490,5 +491,31 @@ describe("routeEffort", () => {
     const { fetchImpl } = jevStub({ hard: { type: "noul", noul: 0.08 } });
     const r = await routeEffort({ apiKey: "k", fetchImpl }, { task: "rename this variable" });
     expect(r.useExpensive).toBe(false);
+  });
+});
+
+describe("THRESHOLDS (frozen tuned constants)", () => {
+  it("pins every value added by the escalate/prune/review pass", () => {
+    // Provenance lives in the THRESHOLDS comments (MEASURED vs PROVISIONAL);
+    // this test exists so a silent retune breaks CI instead of drifting.
+    expect(THRESHOLDS.escalateBelow).toBe(0.6);
+    expect(THRESHOLDS.uncertainBandLow).toBe(0.3);
+    expect(THRESHOLDS.uncertainBandHigh).toBe(0.7);
+    expect(THRESHOLDS.pruneKeep).toBe(0.5);
+    expect(THRESHOLDS.pruneDrop).toBe(0.25);
+    expect(THRESHOLDS.pruneErrorDrop).toBe(0.1);
+    expect(THRESHOLDS.refute).toBe(0.75);
+    expect(THRESHOLDS.findingReal).toBe(0.5);
+  });
+
+  it("keeps the noul uncertainty band well-formed", () => {
+    expect(THRESHOLDS.uncertainBandLow).toBeLessThan(THRESHOLDS.uncertainBandHigh);
+    expect(THRESHOLDS.uncertainBandLow).toBeGreaterThan(0);
+    expect(THRESHOLDS.uncertainBandHigh).toBeLessThan(1);
+  });
+
+  it("keeps the prune bars ordered (drop < keep, error bar strictly lowest)", () => {
+    expect(THRESHOLDS.pruneDrop).toBeLessThan(THRESHOLDS.pruneKeep);
+    expect(THRESHOLDS.pruneErrorDrop).toBeLessThan(THRESHOLDS.pruneDrop);
   });
 });

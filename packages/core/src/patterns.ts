@@ -81,6 +81,42 @@ export const THRESHOLDS = Object.freeze({
   detectPromptInjection: 0.6,
   /** Dedup / same-underlying-fact cutoff. */
   duplicate: 0.5,
+
+  /**
+   * Escalate when a choice/score gate falls BELOW this. PROVISIONAL: vendor
+   * confidence-routing maps "<0.6 confidence -> human"; coco-research's
+   * jev-use treats sub-0.70 decisions as guesses. No local labeled data —
+   * tune on your own outcomes before relying on it.
+   */
+  escalateBelow: 0.6,
+  /**
+   * Noul uncertainty band: a p inside [low, high] is uncertain, outside is
+   * determined. PROVISIONAL but vendor-cited: the consistency-noul cookbook
+   * maps [0.30, 0.70] to uncertain. Noul answers carry no confidence field,
+   * so distance from 0.5 is the only uncertainty signal they give.
+   */
+  uncertainBandLow: 0.3,
+  uncertainBandHigh: 0.7,
+  /**
+   * Prune keep bar: at or above this a context item stays. MEASURED as a
+   * cross-repo consensus (codex-context-diet keepThreshold 0.5, jev-pruner
+   * keepThreshold 0.5) — not a locally measured plateau; re-tune against your
+   * own read-backs.
+   */
+  pruneKeep: 0.5,
+  /** Prune drop bar: at or below this the item may be dropped. MEASURED cross-repo (codex-context-diet dropThreshold 0.25; the band between drop and keep always keeps). */
+  pruneDrop: 0.25,
+  /** Drop bar for error/diagnostic output — far stricter, because a dropped error is how bugs hide. MEASURED cross-repo (codex-context-diet needs <=0.1 on failure-looking output; jev-pruner requires <=0.1 in every segment). */
+  pruneErrorDrop: 0.1,
+  /**
+   * Refute (delete) a review finding only at or above this. PROVISIONAL and
+   * deliberately high: no published measurement exists and the loss is
+   * asymmetric — a false removal is far more expensive than a false keep
+   * (open-code-review's filter states this in prose). Calibrate before lowering.
+   */
+  refute: 0.75,
+  /** Report a finding as a real defect at or above this. PROVISIONAL: upstream has no threshold at all (bare severity enum, unknown values silently coerced to "low"); 0.5 is the coin-flip boundary until calibrated on your own findings. */
+  findingReal: 0.5,
   /**
    * Minimum confidence in the dual gate's category choice. Below this the
    * category is treated as unproven and the verdict becomes `confirm` rather
