@@ -1,8 +1,8 @@
 /**
  * @jev-harness/pi - TypeSafe Jev (System One) judgments as a Pi extension.
  *
- * Registers five fail-open tools (jev_ask, jev_models, jev_route_skills,
- * jev_pick_tool, jev_browse_action) plus two hooks:
+ * Registers six fail-open tools (jev_ask, jev_models, jev_route_skills,
+ * jev_pick_tool, jev_browse_action, jev_classify) plus two hooks:
  * - session_before_compact: verbatim compaction driven by two noul
  *   judgments per tool call/result pair.
  * - input: append-only skill-router advisory (never blocks or rewrites).
@@ -16,6 +16,7 @@ import { noul, type Questions } from "@jev-harness/core";
 import { lexicalShortlist, type JevToolkit } from "@jev-harness/kit";
 import { Type } from "typebox";
 
+import { classifyItems, type ClassifyResult } from "./classify.js";
 import { collectToolPairs, keepThreshold } from "./compact.js";
 import { createPiToolkit } from "./config.js";
 
@@ -33,6 +34,34 @@ function errorText(tool: string, err: unknown): string {
   return tool + " failed (fail-open, host unaffected): " + msg.slice(0, 500);
 }
 
+/** A reduce question in the parts core takes (MapReduceOptions.reduce). */
+function asReduce(value: unknown) {
+  const rec = value as {
+    instructions?: unknown;
+    criteria?: Record<string, string> | string[];
+    type?: "noul" | "choice" | "score";
+  };
+  if (typeof rec?.instructions !== "string" || rec.instructions.length === 0) {
+    throw new Error("reduce.instructions must be a non-empty string");
+  }
+  if (rec.criteria === undefined) {
+    throw new Error("reduce.criteria is required: an object of options, or an ordered array");
+  }
+  return { instructions: rec.instructions, criteria: rec.criteria, type: rec.type };
+}
+
+/** One line per item, then the reduce — the model reads text, details carry the JSON. */
+function classifyText(result: ClassifyResult): string {
+  const lines = result.perItem.map((answers, index) => {
+    const failure = result.failures.find((f) => f.index === index);
+    if (failure) return "[" + index + "] failed: " + failure.error;
+    return "[" + index + "] " + JSON.stringify(answers);
+  });
+  if (result.reduced !== null) lines.push("reduced: " + JSON.stringify(result.reduced));
+  else if (result.reduceSkipped !== undefined)
+    lines.push("reduce skipped: " + result.reduceSkipped);
+  return lines.join("\n");
+}
 export default function jevPi(pi: ExtensionAPI): void {
   // Fresh config per call (the kit re-reads the environment each time), fail
   // open: the key is only required once a call is actually made.
@@ -230,6 +259,61 @@ export default function jevPi(pi: ExtensionAPI): void {
         return ok(JSON.stringify(result, null, 2), result);
       } catch (err) {
         return ok(errorText("jev_browse_action", err));
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "jev_classify",
+    label: "Jev classify",
+    description:
+      "Run the SAME typed questions over a large corpus (strings or JSON items): one request per item, " +
+      "so the cost is items x questions. An optional reduce asks one final question over the per-item " +
+      "verdicts - a digest capped at 200 items / 4000 chars, never the corpus. Results are index-aligned; " +
+      "a failing item is reported by index and the other answers still come back. " +
+      "Fail-open: Jev errors return advisory text, never throw.",
+    parameters: Type.Object({
+      items: Type.Array(Type.Unknown(), {
+        description: "The corpus to judge. Every item gets the same questions.",
+      }),
+      questions: Type.Unknown({
+        description:
+          "Map of question id to question, asked of EVERY item. noul needs instructions; " +
+          "choice needs criteria as an object with at least 2 options; " +
+          "score needs criteria as an ordered array with at least 2 levels.",
+      }),
+      reduce: Type.Optional(
+        Type.Unknown({
+          description:
+            "Optional final question over the per-item verdicts: " +
+            "{type: noul|choice|score, instructions, criteria}.",
+        }),
+      ),
+      concurrency: Type.Optional(
+        Type.Number({ description: "Item judgments in flight at once. Default 4." }),
+      ),
+    }),
+    execute: async (_id, params, signal) => {
+      try {
+        const result = await classifyItems(
+          kit.config(),
+          params.items,
+          params.questions as Questions,
+          {
+            reduce: params.reduce === undefined ? undefined : asReduce(params.reduce),
+            concurrency: params.concurrency,
+            signal: signal ?? undefined,
+          },
+        );
+        return ok(classifyText(result), {
+          perItem: result.perItem,
+          reduced: result.reduced,
+          failures: result.failures,
+          reduceSkipped: result.reduceSkipped,
+          usage: result.usage,
+        });
+      } catch (err) {
+        return ok(errorText("jev_classify", err));
       }
     },
   });

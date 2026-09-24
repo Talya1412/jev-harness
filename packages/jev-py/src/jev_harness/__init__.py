@@ -5,9 +5,10 @@ returns **calibrated probabilities** your code acts on directly. This package is
 a faithful, zero-dependency port of ``@jev-harness/core`` (TypeScript): the same
 async client, the same three primitives (``noul`` / ``choice`` / ``score``), the
 same reusable patterns, and the same transport-level infra (caching, batching,
-audit, local fallback). The :mod:`jev_harness.eval` subpackage ports the eval +
-tuning tooling (Brier, ECE, ROC/PR AUC, threshold sweep) and the ``jev-tune``
-CLI.
+map-reduce, audit, refusal ledger, local fallback), plus the frozen
+:data:`THRESHOLDS` table and the failure taxonomy. The :mod:`jev_harness.eval`
+subpackage ports the eval + tuning tooling (Brier, ECE, ROC/PR AUC, threshold
+sweep) and the ``jev-tune`` CLI.
 """
 from .types import (
     DEFAULT_BASE_URL,
@@ -35,6 +36,7 @@ from .client import (
     score,
     validate_questions,
 )
+from .thresholds import THRESHOLDS
 from .patterns import (
     SkillCandidate,
     RouteSkillResult,
@@ -42,6 +44,10 @@ from .patterns import (
     route_skill_sync,
     judge_destructive,
     judge_destructive_sync,
+    DestructiveVerdict,
+    DESTRUCTIVE_CATEGORIES,
+    judge_destructive_dual,
+    judge_destructive_dual_sync,
     choose_browser_action,
     choose_browser_action_sync,
     pick_tool,
@@ -71,11 +77,30 @@ from .infra import (
     AuditLog,
     BatchHandle,
     CacheOptions,
+    DEFAULT_MAP_CONCURRENCY,
+    DEFAULT_REFUSAL_MAX,
+    MAX_REDUCE_CHARS,
+    MAX_REDUCE_ITEMS,
+    MapReduceOptions,
+    RefusalEntry,
+    RefusalLedger,
     create_audit_log,
+    create_refusal_ledger,
     jev_batch,
     local_route_skill,
     with_audit,
     with_cache,
+    with_map_reduce,
+    with_map_reduce_sync,
+)
+from .taxonomy import (
+    DEFAULT_RATE_LIMIT_BACKOFF_MS,
+    MAX_RATE_LIMIT_BACKOFF_MS,
+    JevFailureKind,
+    JevFailurePolicy,
+    classify_jev_failure,
+    policy_for_failure,
+    retry_after_ms,
 )
 
 __version__ = "0.1.0"
@@ -105,6 +130,8 @@ __all__ = [
     "choice",
     "score",
     "validate_questions",
+    # thresholds
+    "THRESHOLDS",
     # patterns
     "SkillCandidate",
     "RouteSkillResult",
@@ -112,6 +139,10 @@ __all__ = [
     "route_skill_sync",
     "judge_destructive",
     "judge_destructive_sync",
+    "DestructiveVerdict",
+    "DESTRUCTIVE_CATEGORIES",
+    "judge_destructive_dual",
+    "judge_destructive_dual_sync",
     "choose_browser_action",
     "choose_browser_action_sync",
     "pick_tool",
@@ -144,5 +175,23 @@ __all__ = [
     "local_route_skill",
     "with_audit",
     "with_cache",
+    "RefusalEntry",
+    "RefusalLedger",
+    "DEFAULT_REFUSAL_MAX",
+    "create_refusal_ledger",
+    "MapReduceOptions",
+    "MAX_REDUCE_ITEMS",
+    "MAX_REDUCE_CHARS",
+    "DEFAULT_MAP_CONCURRENCY",
+    "with_map_reduce",
+    "with_map_reduce_sync",
+    # taxonomy
+    "JevFailureKind",
+    "JevFailurePolicy",
+    "DEFAULT_RATE_LIMIT_BACKOFF_MS",
+    "MAX_RATE_LIMIT_BACKOFF_MS",
+    "classify_jev_failure",
+    "policy_for_failure",
+    "retry_after_ms",
     "__version__",
 ]

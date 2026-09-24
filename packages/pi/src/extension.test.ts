@@ -28,12 +28,19 @@ afterEach(() => {
 });
 
 describe("jevPi factory registration", () => {
-  it("is an export-default factory registering five tools and two hooks", () => {
+  it("is an export-default factory registering six tools and two hooks", () => {
     expect(typeof jevPi).toBe("function");
     const { api, tools, handlers } = fakeApi();
     jevPi(api);
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ["jev_ask", "jev_browse_action", "jev_models", "jev_pick_tool", "jev_route_skills"].sort(),
+      [
+        "jev_ask",
+        "jev_browse_action",
+        "jev_classify",
+        "jev_models",
+        "jev_pick_tool",
+        "jev_route_skills",
+      ].sort(),
     );
     expect([...handlers.keys()].sort()).toEqual(["input", "session_before_compact"].sort());
   });
@@ -47,6 +54,66 @@ describe("fail-open tool path", () => {
     const models = tools.find((t) => t.name === "jev_models")!;
     const result = await models.execute("call-1", {}, undefined, undefined, {} as any);
     expect(result.content[0].text).toContain("fail-open");
+  });
+});
+describe("jev_classify tool", () => {
+  it("asks each item and reports the per-item answers", async () => {
+    const saved = process.env.TYPESAFE_API_KEY;
+    process.env.TYPESAFE_API_KEY = "k";
+    try {
+      const bodies: any[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: unknown, init?: RequestInit) => {
+          const body = JSON.parse(String(init?.body));
+          bodies.push(body);
+          return new Response(
+            JSON.stringify({ model: body.model, answers: { q: { type: "noul", noul: 0.5 } } }),
+            { status: 200 },
+          );
+        }),
+      );
+      const { api, tools } = fakeApi();
+      jevPi(api);
+      const classify = tools.find((t) => t.name === "jev_classify")!;
+      const result = await classify.execute(
+        "call-1",
+        { items: ["a", "b"], questions: { q: { type: "noul", instructions: "ok?" } } },
+        undefined,
+        undefined,
+        {} as any,
+      );
+      expect(bodies).toHaveLength(2);
+      expect(result.content[0].text).toContain("[0]");
+      expect(result.details.perItem).toHaveLength(2);
+    } finally {
+      if (saved === undefined) delete process.env.TYPESAFE_API_KEY;
+      else process.env.TYPESAFE_API_KEY = saved;
+    }
+  });
+
+  it("fails open with the key check message when no key is configured", async () => {
+    const saved = process.env.TYPESAFE_API_KEY;
+    delete process.env.TYPESAFE_API_KEY;
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const { api, tools } = fakeApi();
+      jevPi(api);
+      const classify = tools.find((t) => t.name === "jev_classify")!;
+      const result = await classify.execute(
+        "call-1",
+        { items: ["a"], questions: { q: { type: "noul", instructions: "ok?" } } },
+        undefined,
+        undefined,
+        {} as any,
+      );
+      expect(result.content[0].text).toContain("fail-open");
+      expect(result.content[0].text).toContain("TYPESAFE_API_KEY");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      if (saved !== undefined) process.env.TYPESAFE_API_KEY = saved;
+    }
   });
 });
 

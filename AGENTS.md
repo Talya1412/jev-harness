@@ -55,9 +55,15 @@ it never emits prose. See @README.md for primitives and patterns.
 - @packages/pr-triage-action — PR triage action (auth impact, risk, route).
 - @packages/kit — shared adapter foundation (env config, envelope, router).
 - @packages/jev-py — zero-dependency Python port (async client, patterns,
-  infra, eval+tune). NOT an npm workspace; `python -m pytest packages/jev-py`
-  (pythonpath=src configured). test_parity.py shares @packages/eval/golden/
-  parity-metrics.json with packages/eval/src/parity.test.ts.
+  infra, thresholds, taxonomy, eval+tune). NOT an npm workspace;
+  `python -m pytest packages/jev-py` (pythonpath=src configured). test_parity.py
+  shares @packages/eval/golden/parity-metrics.json with
+  packages/eval/src/parity.test.ts and pins `jev_harness.THRESHOLDS` to
+  @packages/eval/golden/parity-thresholds.json (generated from
+  core/src/patterns.ts) plus the dual gate's wording against
+  golden/destructive-gate-dual.json. Ports `with_map_reduce`,
+  `create_refusal_ledger`, `judge_destructive_dual`, and the failure taxonomy;
+  every pattern default reads the frozen `THRESHOLDS` table.
 - @packages/vscode — VS Code extension (CJS, `node --test test.js`).
 
 ## Code Style Guidelines

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { THRESHOLDS } from "@jev-harness/core";
 import { binaryMetrics, ece, prAuc } from "./metrics.js";
 import { tune } from "./tune.js";
 import type { BinaryPair } from "./metrics.js";
@@ -68,5 +69,37 @@ describe("TS metrics reproduce the shared parity fixture", () => {
     expect(Math.abs(t.bestThreshold - fixture.expected.tuneBestThreshold)).toBeLessThanOrEqual(tol);
     expect(Math.abs((t.atBest.f1 ?? 0) - fixture.expected.tuneBestF1!)).toBeLessThanOrEqual(tol);
     expect(t.sweep).toHaveLength(fixture.expected.tuneSweepLength);
+  });
+});
+
+/**
+ * The thresholds fixture is the same contract from the other side: Python
+ * asserts jev_harness.THRESHOLDS against it (packages/jev-py/tests/
+ * test_parity.py) and this asserts core's THRESHOLDS against it, so a retune
+ * that only lands on one side fails CI instead of drifting silently. Key ORDER
+ * is asserted too — the table is a frozen contract, not just a set of numbers.
+ */
+const thresholdsPath = join(
+  resolve(dirname(fileURLToPath(import.meta.url))),
+  "..",
+  "golden",
+  "parity-thresholds.json",
+);
+const thresholdsFixture = JSON.parse(readFileSync(thresholdsPath, "utf8")) as {
+  source: string;
+  thresholds: Record<string, number>;
+};
+
+describe("core THRESHOLDS reproduce the shared parity fixture", () => {
+  it("has exactly the fixture's keys, in the same order", () => {
+    expect(Object.keys(THRESHOLDS)).toEqual(Object.keys(thresholdsFixture.thresholds));
+  });
+
+  it("has exactly the fixture's values", () => {
+    expect(THRESHOLDS).toEqual(thresholdsFixture.thresholds);
+  });
+
+  it("is frozen, so a caller cannot retune it by accident", () => {
+    expect(Object.isFrozen(THRESHOLDS)).toBe(true);
   });
 });

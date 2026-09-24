@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 from .client import ask_jev, choice, noul, score
+from .thresholds import THRESHOLDS
 from .types import JevConfig
 
 
@@ -24,7 +25,7 @@ async def verify_claim(
     config: JevConfig,
     input_: Dict[str, Any],
     *,
-    threshold: float = 0.5,
+    threshold: float = THRESHOLDS["claimSupport"],
     signal: Optional[asyncio.Event] = None,
 ) -> VerifyClaimResult:
     """RAG verification gate. Does the cited source specifically support the claim?
@@ -57,7 +58,7 @@ async def detect_prompt_injection(
     config: JevConfig,
     input_: Dict[str, Any],
     *,
-    threshold: float = 0.6,
+    threshold: float = THRESHOLDS["detectPromptInjection"],
     signal: Optional[asyncio.Event] = None,
 ) -> DetectInjectionResult:
     """Detect whether content is a prompt-injection attempt.
@@ -91,7 +92,7 @@ async def needs_more_context(
     config: JevConfig,
     input_: Dict[str, Any],
     *,
-    threshold: float = 0.5,
+    threshold: float = THRESHOLDS["contextSufficiency"],
     signal: Optional[asyncio.Event] = None,
 ) -> NeedsMoreContextResult:
     """Is there enough information to act, or should the agent ask first?
@@ -123,7 +124,7 @@ async def judge_regression(
     config: JevConfig,
     input_: Dict[str, Any],
     *,
-    threshold: float = 0.5,
+    threshold: float = THRESHOLDS["regression"],
     signal: Optional[asyncio.Event] = None,
 ) -> JudgeRegressionResult:
     """Would this diff likely break or alter the described behavior?"""
@@ -184,8 +185,8 @@ async def choose_subagent(
     config: JevConfig,
     input_: Dict[str, Any],
     *,
-    min_confidence: float = 0.4,
-    delegate_threshold: float = 0.5,
+    min_confidence: float = THRESHOLDS["subagentPick"],
+    delegate_threshold: float = THRESHOLDS["delegation"],
     signal: Optional[asyncio.Event] = None,
 ) -> SubagentResult:
     """Decide whether to delegate, and to which specialist subagent.

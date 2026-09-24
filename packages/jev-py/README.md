@@ -26,18 +26,64 @@ if r.blocked:                       # threshold 0.5 — the one true veto
 
 Every pattern has an async form (`judge_destructive`) and a sync wrapper (`judge_destructive_sync`) for simple scripts. The async core is the source of truth; sync wrappers just call `asyncio.run`.
 
+For the gate that should not hard-stop on mere uncertainty, use the dual form — one request, two questions, three outcomes:
+
+```python
+from jev_harness import judge_destructive_dual_sync
+
+v = judge_destructive_dual_sync(cfg, {"tool": "Bash", "input": {"cmd": "python3 script.py"}})
+# v.decision: "allow" | "block" | "confirm"
+# block    — the noul is >= THRESHOLDS["destructiveGate"] AND the category is
+#            "destructive" with confidence >= THRESHOLDS["categoryConfidence"]
+# confirm  — high noul but a disagreeing / abstaining ("unknown") / low-confidence
+#            category: a genuine-but-uncertain call, re-issue it on confirmation
+# allow    — everything else, including a malformed response
+```
+
+## Map-reduce over a large corpus
+
+The dominant real-world workload — the same questions over every item, optionally reduced to one answer — is one call:
+
+```python
+from jev_harness import MapReduceOptions, with_map_reduce_sync
+
+r = with_map_reduce_sync(
+    cfg,
+    posts,                                                    # 100k is fine
+    lambda post, i: {"toxic": {"type": "noul", "instructions": "Is this toxic?"}},
+    MapReduceOptions(reduce={"instructions": "How many are toxic?", "criteria": ["none", "some", "most", "all"]}),
+)
+r["per_item"]   # index-aligned with posts
+r["reduced"]    # one Answer from a CAPPED digest of the verdicts — never the corpus
+```
+
+## Failures and refusals
+
+```python
+from jev_harness import classify_jev_failure, policy_for_failure, create_refusal_ledger
+
+kind = classify_jev_failure(exc)           # auth | model | rate_limit | network | server | unknown
+p = policy_for_failure(kind, exc)          # p.retryable / p.backoff_ms / p.disable_session / p.silent
+                                           # honours Retry-After (seconds or HTTP-date), clamped to 5 min
+
+ledger = create_refusal_ledger()
+ledger.record("bash", "destructive command needs confirmation")   # repeats fold into one entry
+```
+
 ## What's ported
 
-| TS module                | Python module                | Notes                                                                                                                                                      |
-| ------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core/client.ts`         | `jev_harness.client`         | `ask_jev`, `list_jev_models`, `noul`/`choice`/`score` accessors, `validate_questions`. Injectable `transport`. Retries 429/5xx/network with cubic backoff. |
-| `core/types.ts`          | `jev_harness.types`          | `JevConfig`, `JevError`, `JevResponse`, question/answer dataclasses.                                                                                       |
-| `core/patterns.ts`       | `jev_harness.patterns`       | `route_skill`, `judge_destructive` (@ 0.5), `choose_browser_action`, `pick_tool`, `rank_candidates`.                                                       |
-| `core/patterns-extra.ts` | `jev_harness.patterns_extra` | `verify_claim` (RAG gate), `detect_prompt_injection`, `needs_more_context`, `judge_regression`, `triage_urgency`, `choose_subagent`, `debate_judge`.       |
-| `core/infra.ts`          | `jev_harness.infra`          | `with_cache`, `jev_batch`, `create_audit_log`/`with_audit`, `local_route_skill`.                                                                           |
-| `eval/metrics.ts`        | `jev_harness.eval.metrics`   | `brier_score`, `ece`, `confusion_matrix`, `precision_recall_f1`, `roc_auc`, `pr_auc`.                                                                      |
-| `eval/tune.ts`           | `jev_harness.eval.tune`      | `tune` (F1 / Youden sweep).                                                                                                                                |
-| `eval/cli.ts`            | `jev_harness.eval.cli`       | `jev-tune` console script.                                                                                                                                 |
+| TS module                  | Python module                | Notes                                                                                                                                                            |
+| -------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/client.ts`           | `jev_harness.client`         | `ask_jev`, `list_jev_models`, `noul`/`choice`/`score` accessors, `validate_questions`. Injectable `transport`. Retries 429/5xx/network with cubic backoff.       |
+| `core/types.ts`            | `jev_harness.types`          | `JevConfig`, `JevError`, `JevResponse`, question/answer dataclasses.                                                                                             |
+| `core/patterns.ts`         | `jev_harness.patterns`       | `route_skill`, `judge_destructive`, `judge_destructive_dual`, `choose_browser_action`, `pick_tool`, `rank_candidates`. All defaults read the `THRESHOLDS` table. |
+| `core/patterns-extra.ts`   | `jev_harness.patterns_extra` | `verify_claim` (RAG gate), `detect_prompt_injection`, `needs_more_context`, `judge_regression`, `triage_urgency`, `choose_subagent`, `debate_judge`.             |
+| `core/infra.ts`            | `jev_harness.infra`          | `with_cache`, `jev_batch`, `with_map_reduce`, `create_audit_log`/`with_audit`, `create_refusal_ledger`, `local_route_skill`.                                     |
+| `core/patterns.ts` (table) | `jev_harness.thresholds`     | `THRESHOLDS` — the one frozen table of every tuned number, pinned to the TS side by `golden/parity-thresholds.json`.                                             |
+| `core/taxonomy.ts`         | `jev_harness.taxonomy`       | `classify_jev_failure`, `policy_for_failure`, `retry_after_ms`.                                                                                                  |
+| `eval/metrics.ts`          | `jev_harness.eval.metrics`   | `brier_score`, `ece`, `confusion_matrix`, `precision_recall_f1`, `roc_auc`, `pr_auc`.                                                                            |
+| `eval/tune.ts`             | `jev_harness.eval.tune`      | `tune` (F1 / Youden sweep).                                                                                                                                      |
+| `eval/cli.ts`              | `jev_harness.eval.cli`       | `jev-tune` console script.                                                                                                                                       |
 
 ## Tuning a threshold
 
@@ -76,7 +122,7 @@ Both are valid; pick the one whose semantics you want.
 
 ```bash
 pip install -e packages/jev-py[dev]
-cd packages/jev-py && python -m pytest      # 91 tests
+cd packages/jev-py && python -m pytest      # 167 tests
 ```
 
 Tests use a fake async transport (no network), mirroring the TS suite case-for-case.

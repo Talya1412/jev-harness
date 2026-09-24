@@ -1,0 +1,26 @@
+{
+  "description": "Shared parity fixture: the frozen THRESHOLDS table from @jev-harness/core (packages/core/src/patterns.ts) must be reproduced exactly — every key, in declaration order, with the same value — by jev_harness.THRESHOLDS (Python). Any drift fails a test.",
+  "source": "packages/core/src/patterns.ts",
+  "thresholds": {
+    "destructiveGate": 0.5,
+    "skillRouting": 0.5,
+    "gateInjection": 0.7,
+    "detectPromptInjection": 0.6,
+    "duplicate": 0.5,
+    "categoryConfidence": 0.5,
+    "verifyStep": 0.6,
+    "clarification": 0.5,
+    "effortRouting": 0.5,
+    "browserAction": 0.4,
+    "toolPick": 0.4,
+    "toolRisk": 0.5,
+    "claimSupport": 0.5,
+    "contextSufficiency": 0.5,
+    "regression": 0.5,
+    "subagentPick": 0.4,
+    "delegation": 0.5,
+    "commitSafe": 0.8,
+    "secretLeak": 0.6,
+    "localRouterFloor": 0.05
+  }
+}

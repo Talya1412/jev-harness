@@ -21,10 +21,15 @@ import {
   askJev,
   chooseBrowserAction,
   judgeDestructive,
+  JevError,
   listJevModels,
   pickTool,
   rankCandidates,
   routeSkill,
+  withMapReduce,
+  type Answer,
+  type JevConfig,
+  type MapReduceOptions,
   type Questions,
 } from "@jev-harness/core";
 import { resolveJevConfig } from "./config.js";
@@ -67,6 +72,173 @@ function asRecord(v: unknown, what: string): Record<string, unknown> {
     throw new Error('"' + what + '" must be an object');
   }
   return v as Record<string, unknown>;
+}
+
+/**
+ * A reduce question: core takes its parts rather than a whole Question
+ * (packages/core/src/infra.ts, MapReduceOptions.reduce).
+ */
+function asReduceQuestion(v: unknown): MapReduceOptions["reduce"] {
+  const rec = asRecord(v, "reduce");
+  const instructions = rec.instructions;
+  if (typeof instructions !== "string" || instructions.length === 0) {
+    throw new Error('"reduce.instructions" must be a non-empty string');
+  }
+  if (rec.criteria === undefined) {
+    throw new Error(
+      '"reduce.criteria" is required: an object of options, or an ordered array of levels',
+    );
+  }
+  const criteria = Array.isArray(rec.criteria)
+    ? rec.criteria.map((level) => String(level))
+    : (asRecord(rec.criteria, "reduce.criteria") as Record<string, string>);
+  const type =
+    rec.type === "noul" || rec.type === "choice" || rec.type === "score" ? rec.type : undefined;
+  return { instructions, criteria, type };
+}
+
+/** The API rejected this item payload — the only item-specific failure. */
+const ITEM_LEVEL_STATUS = new Set([400, 413, 422]);
+
+/**
+ * Core withMapReduce is atomic: it rejects the whole call when any item
+ * fails, and fail-open handling belongs at the caller. A corpus tool cannot
+ * afford to drop every answer for one bad item, so only a payload rejection
+ * (400/413/422) counts as a per-item failure; config, auth, rate-limit,
+ * server, and network errors stay batch-level and keep the atomic behaviour.
+ */
+function isBatchLevelError(err: unknown): boolean {
+  if (err instanceof JevError) {
+    return err.status === undefined || !ITEM_LEVEL_STATUS.has(err.status);
+  }
+  return true;
+}
+
+/** Item judgments in flight while attributing failures. Core default is 4. */
+const DEFAULT_MAP_CONCURRENCY = 4;
+
+interface ClassifyOutcome {
+  perItem: Array<Record<string, Answer> | null>;
+  reduced: Answer | null;
+  failures: Array<{ index: number; error: string }>;
+  reduceSkipped?: string;
+  usage?: { input_tokens?: number; output_tokens?: number };
+}
+
+/** One request per item, so the totals are what the run actually spent. */
+function mergeUsage(
+  a?: { input_tokens?: number; output_tokens?: number },
+  b?: { input_tokens?: number; output_tokens?: number },
+): { input_tokens?: number; output_tokens?: number } | undefined {
+  if (a === undefined && b === undefined) return undefined;
+  return {
+    input_tokens: (a?.input_tokens ?? 0) + (b?.input_tokens ?? 0),
+    output_tokens: (a?.output_tokens ?? 0) + (b?.output_tokens ?? 0),
+  };
+}
+
+/**
+ * Sum usage across every Jev response in the run. The wrapped fetch is the
+ * only place the responses pass through, so the reducer and the items are
+ * both counted without changing what core sees.
+ */
+function collectUsage(config: JevConfig): {
+  config: JevConfig;
+  usage: () => { input_tokens?: number; output_tokens?: number } | undefined;
+} {
+  let totals: { input_tokens?: number; output_tokens?: number } | undefined;
+  const inner = config.fetchImpl ?? fetch;
+  const wrapped: typeof fetch = async (url, init) => {
+    const res = await inner(url, init);
+    if (res.ok) {
+      try {
+        const body = (await res.clone().json()) as { usage?: typeof totals };
+        if (body?.usage) totals = mergeUsage(totals, body.usage);
+      } catch {
+        // Usage is best-effort: an unreadable body must never break a call.
+      }
+    }
+    return res;
+  };
+  return { config: { ...config, fetchImpl: wrapped }, usage: () => totals };
+}
+
+/**
+ * The same questions over every item, then an optional reduce — core
+ * withMapReduce plus per-item attribution. A batch rejected by one bad item
+ * is retried item by item (bounded by concurrency) so every answer survives
+ * and each failure is named; that costs up to 2x calls for the batch. The
+ * reduce step needs a complete answer set, so any failure skips it and
+ * reduceSkipped says why.
+ */
+async function classifyCorpus(
+  config: JevConfig,
+  items: readonly unknown[],
+  questions: Questions,
+  opts: { reduce?: MapReduceOptions["reduce"]; concurrency?: number; signal?: AbortSignal },
+): Promise<ClassifyOutcome> {
+  const collector = collectUsage(config);
+  try {
+    const { perItem, reduced } = await withMapReduce(collector.config, items, () => questions, {
+      reduce: opts.reduce,
+      concurrency: opts.concurrency,
+      signal: opts.signal,
+    });
+    return { perItem, reduced, failures: [], usage: collector.usage() };
+  } catch (err) {
+    if (isBatchLevelError(err)) throw err;
+    return await attributeItemFailures(collector, items, questions, opts, err);
+  }
+}
+
+/** Retry a rejected batch one item at a time so each failure gets its index. */
+async function attributeItemFailures(
+  collector: ReturnType<typeof collectUsage>,
+  items: readonly unknown[],
+  questions: Questions,
+  opts: { reduce?: MapReduceOptions["reduce"]; concurrency?: number; signal?: AbortSignal },
+  batchErr: unknown,
+): Promise<ClassifyOutcome> {
+  const perItem: Array<Record<string, Answer> | null> = new Array(items.length).fill(null);
+  const failures: Array<{ index: number; error: string }> = [];
+  const concurrency = Math.max(1, Math.floor(opts.concurrency ?? DEFAULT_MAP_CONCURRENCY));
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      try {
+        // One item per call; core concurrency is the outer pool job.
+        const one = await withMapReduce(collector.config, [items[index]], () => questions, {
+          concurrency: 1,
+          signal: opts.signal,
+        });
+        perItem[index] = one.perItem[0] ?? {};
+      } catch (err) {
+        if (isBatchLevelError(err)) throw err;
+        failures.push({ index, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  failures.sort((a, b) => a.index - b.index);
+  const reduce = opts.reduce;
+  const skipped =
+    reduce === undefined
+      ? undefined
+      : failures.length > 0
+        ? failures.length +
+          " of " +
+          items.length +
+          " item(s) failed, so the reduce digest would be incomplete"
+        : "reduce failed: " + (batchErr instanceof Error ? batchErr.message : String(batchErr));
+  return {
+    perItem,
+    reduced: null,
+    failures,
+    reduceSkipped: skipped,
+    usage: collector.usage(),
+  };
 }
 
 /** Exported so the tool contract can be asserted without starting a server. */
@@ -226,9 +398,42 @@ export const TOOLS: Tool[] = [
       required: ["task", "candidates"],
     },
   },
+  {
+    name: "jev_classify",
+    description:
+      "Run the SAME typed questions over a large corpus — strings or arbitrary JSON items — with one request per item (cost = items x questions). An optional reduce sums the per-item verdicts into one final answer. Returns {perItem (index-aligned, null where an item failed), reduced, failures, reduceSkipped, usage}. Failures are reported per index without dropping the other answers. The reduce digest is capped at 200 items / 4000 chars of verdicts (core), so it scales flat; any failed item skips the reduce (see reduceSkipped).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          description:
+            "The corpus to judge. Strings or arbitrary JSON objects — every item gets the same questions.",
+          items: { type: ["string", "object", "number", "boolean", "array", "null"] },
+        },
+        questions: {
+          type: "object",
+          description:
+            "Map of id -> question, asked of EVERY item. Each question: {type: 'noul'|'choice'|'score', instructions: string, criteria?: object|array}. Choice needs >=2 criteria entries; score needs >=2 ordered levels.",
+          additionalProperties: { type: "object" },
+        },
+        reduce: {
+          type: "object",
+          description:
+            "Optional final question judged over the per-item verdicts instead of the corpus: {instructions, criteria (object of options or ordered array of levels), type? (noul|choice|score)}.",
+        },
+        concurrency: {
+          type: "number",
+          description: "Item judgments in flight at once (default 4).",
+        },
+      },
+      required: ["items", "questions"],
+    },
+  },
 ];
 
-async function handleTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+/** Exported so tool behaviour can be asserted without starting a server. */
+export async function handleTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
     case "jev_ask": {
       const questions = asRecord(args.questions, "questions");
@@ -325,6 +530,17 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
         return c;
       });
       return rankCandidates(resolveJevConfig(), task, candidates);
+    }
+    case "jev_classify": {
+      const items = reqArray(args, "items");
+      if (items.length === 0) throw new Error('"items" must not be empty');
+      const questions = asRecord(args.questions, "questions") as unknown as Questions;
+      const reduce = args.reduce === undefined ? undefined : asReduceQuestion(args.reduce);
+      const concurrency = optNumber(args, "concurrency");
+      return classifyCorpus(resolveJevConfig(), items, questions, {
+        reduce,
+        concurrency,
+      });
     }
     default:
       throw new Error("Unknown tool: " + name);

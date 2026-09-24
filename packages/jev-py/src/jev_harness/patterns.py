@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .client import ask_jev, choice, noul, score
+from .thresholds import THRESHOLDS
 from .types import JevConfig
 
 
@@ -38,7 +39,7 @@ async def route_skill(
     message: str,
     skills: List[SkillCandidate],
     *,
-    min_confidence: float = 0.5,
+    min_confidence: float = THRESHOLDS["skillRouting"],
     max_candidates: int = 12,
     signal: Optional[asyncio.Event] = None,
 ) -> RouteSkillResult:
@@ -81,7 +82,7 @@ async def judge_destructive(
     config: JevConfig,
     call: Dict[str, Any],
     *,
-    threshold: float = 0.5,
+    threshold: float = THRESHOLDS["destructiveGate"],
     signal: Optional[asyncio.Event] = None,
 ) -> JudgeDestructiveResult:
     """Decide whether a tool call is destructive enough to warrant confirmation.
@@ -105,6 +106,106 @@ def judge_destructive_sync(*args, **kwargs) -> JudgeDestructiveResult:
 
 
 @dataclass
+class DestructiveVerdict:
+    """The three-outcome verdict of the dual destructive gate."""
+
+    destructive: float
+    """P(destructive) from the noul question."""
+    category: str
+    """Chosen category id, or "unknown" when the choice abstained."""
+    confidence: float
+    """Confidence of the category choice."""
+    decision: str
+    """One of "allow" / "block" / "confirm"."""
+
+
+# The only labels the category question accepts; anything else reads as an
+# abstain. Declaration order matches the TS source.
+DESTRUCTIVE_CATEGORIES = ("destructive", "reversible-mutation", "read-only", "unknown")
+
+
+async def judge_destructive_dual(
+    config: JevConfig,
+    call: Dict[str, Any],
+    *,
+    threshold: float = THRESHOLDS["destructiveGate"],
+    signal: Optional[asyncio.Event] = None,
+) -> DestructiveVerdict:
+    """Destructive gate with a way forward.
+
+    :func:`judge_destructive` asks one noul and hard-blocks above the threshold,
+    which left callers with no move when the model was merely uncertain: a plain
+    ``python3 script.py`` was blocked at 0.84/0.95 with no confirmation path.
+    This variant asks two questions in ONE request — the same noul, plus a
+    ``choice`` over what the call actually does — so the caller can separate
+    "destructive" from "I cannot tell".
+
+    Three outcomes: ``block`` only when the noul is high AND the category agrees
+    it is destructive with usable confidence; ``confirm`` when the noul is high
+    but the category disagrees, abstains (``unknown``), or is low-confidence —
+    that case is a genuine-but-uncertain one, and the caller re-issues the call
+    with explicit user confirmation instead of dying silently; ``allow``
+    otherwise. The abstain option is mandatory in the choice set: a choice
+    without one forces a wrong answer where "I do not know" is the truth.
+
+    Never raises on an unparseable answer — a missing question resolves to the
+    same all-zero verdict ``allow`` gives, so a malformed response cannot turn
+    into a block. Transport failures still reject; failing open around them is
+    the caller's job.
+    """
+    response = await ask_jev(
+        config,
+        {
+            "tool": call.get("tool", ""),
+            "input": json.dumps(call.get("input") or {})[0:4000],
+            "cwd": call.get("cwd"),
+        },
+        {
+            "destructive": {
+                "type": "noul",
+                "instructions": "Running this exact tool call would destroy or irreversibly change data, history, or system state. That includes: recursive or bulk deletion; overwriting or truncating existing files without backup; git history rewrite, force-push, or discarding uncommitted work; dropping tables or deleting namespaces/volumes; formatting, wiping, or overwriting a disk or device; changing permissions or ownership across a broad path; exhausting, killing, or shutting down the machine (fork bombs, mass process kill, shutdown/reboot); publishing a package or spending money; or sending secrets to an external endpoint. Reading, searching, listing, creating a brand-new file, building, running tests, or editing a file in place with a normal edit tool is NOT destructive.",
+            },
+            "category": {
+                "type": "choice",
+                "instructions": "What would this tool call actually do? Judge the call itself, not the tool's general reputation.",
+                "criteria": {
+                    "destructive": "Deletes or overwrites existing data, rewrites or force-pushes history, spends money, or publishes irreversibly.",
+                    "reversible-mutation": "Changes state that can be restored — a normal file edit, an append, a committed change on a branch.",
+                    "read-only": "Only reads, lists, searches, builds, or tests; nothing on disk or remote changes.",
+                    "unknown": "Cannot tell from the call alone.",
+                },
+            },
+        },
+        signal,
+    )
+
+    # A missing or malformed answer is "no evidence", never a block: each half
+    # falls back independently so one bad answer cannot discard the other.
+    try:
+        destructive = noul(response, "destructive")
+    except Exception:
+        destructive = 0.0
+    try:
+        picked = choice(response, "category")
+        label = str(picked["choice"] or "").strip().lower()
+        category = label if label in DESTRUCTIVE_CATEGORIES else "unknown"
+        confidence = float(picked["confidence"] or 0.0)
+    except Exception:
+        category, confidence = "unknown", 0.0
+
+    if not (destructive >= threshold):
+        return DestructiveVerdict(destructive=destructive, category=category, confidence=confidence, decision="allow")
+    proven = category == "destructive" and confidence >= THRESHOLDS["categoryConfidence"]
+    return DestructiveVerdict(
+        destructive=destructive, category=category, confidence=confidence, decision="block" if proven else "confirm"
+    )
+
+
+def judge_destructive_dual_sync(*args, **kwargs) -> DestructiveVerdict:
+    return asyncio.run(judge_destructive_dual(*args, **kwargs))
+
+
+@dataclass
 class ChooseBrowserActionResult:
     operation: Optional[str]
     target: Optional[str]
@@ -116,7 +217,7 @@ async def choose_browser_action(
     config: JevConfig,
     input_: Dict[str, Any],
     *,
-    min_confidence: float = 0.4,
+    min_confidence: float = THRESHOLDS["browserAction"],
     signal: Optional[asyncio.Event] = None,
 ) -> ChooseBrowserActionResult:
     """Pick one browser action from a snapshot. Does not execute anything."""
@@ -178,8 +279,8 @@ async def pick_tool(
     config: JevConfig,
     input_: Dict[str, Any],
     *,
-    min_confidence: float = 0.4,
-    risk_threshold: float = 0.5,
+    min_confidence: float = THRESHOLDS["toolPick"],
+    risk_threshold: float = THRESHOLDS["toolRisk"],
     signal: Optional[asyncio.Event] = None,
 ) -> PickToolResult:
     """Select one tool (or None) and flag whether it needs confirmation."""
@@ -239,6 +340,10 @@ __all__ = [
     "JudgeDestructiveResult",
     "judge_destructive",
     "judge_destructive_sync",
+    "DestructiveVerdict",
+    "DESTRUCTIVE_CATEGORIES",
+    "judge_destructive_dual",
+    "judge_destructive_dual_sync",
     "ChooseBrowserActionResult",
     "choose_browser_action",
     "choose_browser_action_sync",

@@ -1,6 +1,6 @@
 # @jev-harness/pi
 
-Pi extension packaging TypeSafe Jev (System One) judgments: five fail-open
+Pi extension packaging TypeSafe Jev (System One) judgments: six fail-open
 tools, an append-only skill-router advisory, and Jev-driven verbatim
 compaction. Mirrors the OMP adapter; Pi and OMP share the same extension
 factory shape (`export default function (pi: ExtensionAPI)`).
@@ -65,7 +65,7 @@ export TYPESAFE_API_KEY='...'
 
 ## Tools
 
-All five tools fail open: Jev errors resolve to advisory text, never throw.
+All six tools fail open: Jev errors resolve to advisory text, never throw.
 
 - `jev_ask` — raw judgments over an arbitrary JSON `state` plus a
   `questions` map (`noul` / `choice` / `score`).
@@ -76,6 +76,17 @@ All five tools fail open: Jev errors resolve to advisory text, never throw.
   side-effecting choices. Does not execute anything.
 - `jev_browse_action` — pick the next browser operation from a page snapshot.
   Does not execute anything.
+- `jev_classify` — the same typed questions over a whole corpus (strings or
+  JSON items), with an optional reduce. One request per item, so the cost is
+  `items × questions`; `items`, `questions`, optional `reduce`
+  (`{instructions, criteria, type?}`) and `concurrency` (default 4). Returns
+  index-aligned results with per-item failures named, and the reduce judges a
+  digest of the verdicts — **capped at 200 items / 4000 chars** (core's
+  `MAX_REDUCE_ITEMS` / `MAX_REDUCE_CHARS` in
+  `packages/core/src/infra.ts`), never the corpus. Any item failure skips the
+  reduce (`reduceSkipped` says why) because the digest would be incomplete.
+  A failure that says nothing about one item (missing key, 401/403, 429, 5xx,
+  network) fails the whole call and renders as advisory text.
 
 ## Hooks
 
