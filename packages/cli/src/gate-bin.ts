@@ -21,6 +21,10 @@ import {
   resolveState,
 } from "./gate.js";
 
+// Deliberately 2x core's 15s per-request default: jev-gate judges a whole diff
+// or command output, so one slow judgment is a normal outcome here rather than a
+// pathological one. The retry budget still applies on top; JEV_TIMEOUT_MS
+// (capped by kit's parseTimeoutMs) overrides this per run.
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 async function main(): Promise<number> {

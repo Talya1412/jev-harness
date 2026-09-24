@@ -7,6 +7,7 @@
  */
 import { askJev, noul, choice, score } from "./client.js";
 import { JevError, type JevConfig } from "./types.js";
+import { THRESHOLDS } from "./patterns.js";
 
 // ---------------- safety & verification ----------------
 
@@ -20,7 +21,7 @@ export async function verifyClaim(
   input: { claim: string; source: string; context?: string },
   options: { threshold?: number; signal?: AbortSignal } = {},
 ): Promise<{ supported: number; unsupported: boolean }> {
-  const threshold = options.threshold ?? 0.5;
+  const threshold = options.threshold ?? THRESHOLDS.claimSupport;
   const response = await askJev(
     config,
     {
@@ -52,7 +53,7 @@ export async function detectPromptInjection(
   input: { content: string; role?: string; context?: string },
   options: { threshold?: number; signal?: AbortSignal } = {},
 ): Promise<{ injection: number; blocked: boolean }> {
-  const threshold = options.threshold ?? 0.6;
+  const threshold = options.threshold ?? THRESHOLDS.detectPromptInjection;
   const response = await askJev(
     config,
     {
@@ -83,7 +84,7 @@ export async function needsMoreContext(
   input: { task: string; context: string },
   options: { threshold?: number; signal?: AbortSignal } = {},
 ): Promise<{ sufficient: number; shouldAsk: boolean }> {
-  const threshold = options.threshold ?? 0.5;
+  const threshold = options.threshold ?? THRESHOLDS.contextSufficiency;
   const response = await askJev(
     config,
     {
@@ -111,7 +112,7 @@ export async function judgeRegression(
   input: { diff: string; behavior: string },
   options: { threshold?: number; signal?: AbortSignal } = {},
 ): Promise<{ regression: number; flagged: boolean }> {
-  const threshold = options.threshold ?? 0.5;
+  const threshold = options.threshold ?? THRESHOLDS.regression;
   const response = await askJev(
     config,
     {
@@ -190,8 +191,8 @@ export async function chooseSubagent(
   input: { task: string; subagents: Array<{ name: string; description?: string }> },
   options: { minConfidence?: number; delegateThreshold?: number; signal?: AbortSignal } = {},
 ): Promise<SubagentResult> {
-  const minConfidence = options.minConfidence ?? 0.4;
-  const delegateThreshold = options.delegateThreshold ?? 0.5;
+  const minConfidence = options.minConfidence ?? THRESHOLDS.subagentPick;
+  const delegateThreshold = options.delegateThreshold ?? THRESHOLDS.delegation;
   const shortlist = input.subagents.slice(0, 12);
   if (shortlist.length === 0) {
     return { delegate: 0, shouldDelegate: false, subagent: null, confidence: 0 };

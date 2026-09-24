@@ -7,6 +7,16 @@
  * higher. Returns candidate names best-first; an empty result means nothing
  * matched lexically and the caller decides whether to fall back to the full
  * roster.
+ *
+ * @example
+ * const roster = [
+ *   { name: "browser-testing", description: "Automate a browser." },
+ *   { name: "fh6-modding", description: "Game modding." },
+ * ];
+ * // ["browser-testing", "fh6-modding"] — best lexical match first.
+ * lexicalShortlist("test the login page in a browser", roster);
+ * // [] is never returned: the full roster comes back, capped at the limit.
+ * lexicalShortlist("zzz", roster, { limit: 1 }); // ["browser-testing"]
  */
 export interface SkillName {
   name: string;

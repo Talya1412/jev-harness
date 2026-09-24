@@ -10,3 +10,4 @@ export * from "./types.js";
 export * from "./cache.js";
 export * from "./persist-cache.js";
 export * from "./guard.js";
+export * from "./taxonomy.js";

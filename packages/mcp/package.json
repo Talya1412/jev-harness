@@ -36,6 +36,7 @@
   },
   "dependencies": {
     "@jev-harness/core": "^0.5.0",
+    "@jev-harness/kit": "*",
     "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {

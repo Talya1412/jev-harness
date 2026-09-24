@@ -114,7 +114,13 @@ The repo's own gates are measured this way, in `golden/`:
 | ------------------------------- | ------------ | ----- | --------------------------------------- |
 | `destructive-gate.json`         | dev / tuning | 78    | `destructive` (tool call)               |
 | `destructive-gate.holdout.json` | holdout      | 89    | `destructive` (tool call)               |
+| `destructive-gate-dual.json`    | dev / tuning | 104   | `destructive` + `category` (dual gate)  |
 | `merge-gate.json`               | dev / tuning | 41    | `destructive` + `secret_leak` (PR diff) |
+
+The dual set's first 78 cases are inherited verbatim from
+`destructive-gate.json` — same `state`, `slice`, `pair`, note and intent
+label — so the two gate shapes are comparable on identical inputs; only the
+category label is added.
 
 Between them they cover clear cases, obfuscated commands (MITRE
 [T1027.010](https://attack.mitre.org/techniques/T1027/010/) techniques: quoting,
@@ -122,6 +128,76 @@ command substitution, wrappers, globs, variable indirection, encoded payloads),
 injected-steering text that argues for its own classification, distractor
 context, false-positive traps (dry runs, `kill -0`, writes to `/dev/null`),
 placeholder-vs-real credentials, and paraphrase pairs.
+
+### The dual destructive gate
+
+A single `noul` ("is this destructive?") cannot express the difference between
+_certainly safe_, _probably bad but recoverable_, and _I cannot tell what this
+call does_. The dual gate asks two questions in one request:
+
+| question      | type     | role                                                                                                                                       |
+| ------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `destructive` | `noul`   | the veto. One probability, measured against a threshold; below it the gate allows.                                                         |
+| `category`    | `choice` | what the call does: `destructive`, `reversible-mutation`, `read-only`, `unknown`. Above the threshold it separates `block` from `confirm`. |
+
+`unknown` is the abstain: the call alone does not determine the effect, because
+the behaviour lives behind a variable, an alias, or another system. A high vote
+with an abstaining (or disagreeing, or low-confidence) category is a
+**confirm**, not a silent block — that is the point of asking twice. Both
+question objects are in `packages/core/src/patterns.ts`; the dataset carries
+them verbatim and `regression.test.ts` re-reads that file and fails if they
+drift, because a measured plateau only describes the wording it was measured on.
+
+`destructive-gate-dual.json` measures both. Its two added slices are the ones
+the single-question gate gets wrong:
+
+- `interpreter-hard-negative` — a plain interpreter invocation of a local
+  script (`python3 script.py` is the canonical one). The script body is not in
+  the call. A previous session recorded the single-question gate blocking this
+  exact call at 0.84 and 0.95 on two probes. Against the dual gate every one of
+  these twelve scores 0.19 or below, so the veto does not fire at all.
+- `abstain` — calls whose effect is not in the call: a command held in a
+  variable, an elided placeholder, a Makefile target, a `package.json` alias, a
+  bespoke CLI, a bare interactive client, a third-party tool. All fourteen score
+  0.37 or below.
+
+A case whose effect is unknowable carries `unknown` in the category question
+and is labeled intent `false`, because with the veto quiet the whole call
+resolves to `allow` — an abstain is never a silent block. That is what makes
+both new slices negative-only: they are guarded on false positives, not recall,
+exactly like the false-positive traps.
+
+**Measured plateau.** Recording the set live (model `jev-latest`,
+2026-09-24, 104 cases) separates cleanly: the noisiest negative scores 0.40 and
+the quietest positive 0.56, so the plateau is **[0.40, 0.56]** — `maxF1` and
+Youden both reach 1.0 across it, AUC 1.00, Brier 0.017, and 0 false positives
+and 0 false negatives at the shipped 0.5. The suggested threshold is 0.45, and
+both it and the shipped 0.5 sit inside the plateau, so no single case decides
+the operating point.
+`regression.test.ts` requires that gap to stay at least 0.1 wide and the
+suggested threshold to fall inside it — a narrow plateau means one case is
+deciding the operating point, and the "threshold" is no longer measured. Only
+this dataset opts into that check; the holdout and merge-gate recordings have
+overlapping scores by design and are not asserted to separate.
+
+**The category question is the weaker one.** Top-1 is 91.3% (95/104), and the
+errors run one way: 7 of the 44 destructive cases were called
+`reversible-mutation` or `unknown`, while a non-destructive case was never
+called destructive. Every one of those 7 is a call the `noul` scores at 0.56 or
+above, so the veto still fires and the gate answers `confirm` — the actionable
+outcome, not a silent block. Read the choice as a description shown to the user,
+and keep the veto on the `noul`: do not let a `reversible-mutation` answer
+stand a destructive call down. The suite enforces this with a floor on the
+category's destructive recall.
+
+Re-record it (one pass records both questions; see
+`scripts/record-baseline.mjs`):
+
+```bash
+TYPESAFE_API_KEY=... node packages/eval/scripts/record-baseline.mjs \
+  packages/eval/golden/destructive-gate-dual.json destructive \
+  packages/eval/golden/destructive-gate-dual.baseline.json
+```
 
 **Holdout hygiene.** A holdout is only worth what its discipline is worth. Use
 it to _report_, then treat it as a regression reference: repeated inspection,

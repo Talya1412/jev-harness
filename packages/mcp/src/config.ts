@@ -1,19 +1,13 @@
 /**
  * Resolve the Jev client config from the environment.
  *
- * Rule: the API key always comes from `process.env.TYPESAFE_API_KEY`
- * (or an explicit override passed by the caller) — it is never hardcoded
- * and never logged. Optional overrides: TYPESAFE_BASE_URL,
- * TYPESAFE_DEFAULT_MODEL, JEV_TIMEOUT_MS.
+ * The rule itself lives in \`@jev-harness/kit\` (\`resolveEnvConfig\`); this module
+ * supplies only the MCP-specific piece: an error message that names the MCP
+ * client config, because a server started by a client has no obvious shell to
+ * export from. The API key is never hardcoded and never logged.
  */
-import { DEFAULT_BASE_URL, DEFAULT_MODEL, type JevConfig } from "@jev-harness/core";
-
-export function parseTimeoutMs(raw: string | undefined): number | undefined {
-  if (raw === undefined || raw === "") return undefined;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return undefined;
-  return Math.floor(n);
-}
+import type { JevConfig } from "@jev-harness/core";
+import { resolveEnvConfig, type Env } from "@jev-harness/kit";
 
 /**
  * Build a JevConfig from env + optional explicit overrides.
@@ -21,22 +15,22 @@ export function parseTimeoutMs(raw: string | undefined): number | undefined {
  */
 export function resolveJevConfig(
   overrides: Partial<JevConfig> = {},
-  env: Record<string, string | undefined> = process.env,
+  env: Env = process.env,
 ): JevConfig {
-  const apiKey = (overrides.apiKey ?? env.TYPESAFE_API_KEY ?? "").trim();
-  if (!apiKey) {
-    throw new Error(
-      "TYPESAFE_API_KEY is not set. Export it in your environment " +
-        "(e.g. export TYPESAFE_API_KEY=...) or add it to the MCP client " +
-        "config under env, then restart the server.",
-    );
+  try {
+    // A tool call sends the state the caller deliberately submitted, so MCP
+    // keeps full fidelity: redaction is off by policy and JEV_REDACT is
+    // deliberately ignored here.
+    return resolveEnvConfig({ env, overrides, requireKey: true, redact: false });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("TYPESAFE_API_KEY is not set")) {
+      throw new Error(
+        "TYPESAFE_API_KEY is not set. Export it in your environment " +
+          "(e.g. export TYPESAFE_API_KEY=...) or add it to the MCP client " +
+          "config under env, then restart the server.",
+        { cause: err },
+      );
+    }
+    throw err;
   }
-  const config: JevConfig = {
-    apiKey,
-    baseUrl: overrides.baseUrl ?? env.TYPESAFE_BASE_URL ?? DEFAULT_BASE_URL,
-    model: overrides.model ?? env.TYPESAFE_DEFAULT_MODEL ?? DEFAULT_MODEL,
-  };
-  const timeoutMs = overrides.timeoutMs ?? parseTimeoutMs(env.JEV_TIMEOUT_MS);
-  if (timeoutMs !== undefined) config.timeoutMs = timeoutMs;
-  return config;
 }

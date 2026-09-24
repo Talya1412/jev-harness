@@ -34,9 +34,37 @@ function asker(probs: Record<string, number>) {
   };
 }
 
+/**
+ * A region in OMP's OWN transcript spelling — the shape a real session file
+ * holds: assistant messages carry `type: "toolCall"` blocks (id/name/
+ * arguments) and every result is a separate `role: "toolResult"` message
+ * (toolCallId/toolName/content). Verified against a 7.8 MB live transcript:
+ * 720 toolCall blocks + 720 toolResult messages, and zero `tool_use` /
+ * `tool_result` blocks.
+ */
+function nativeRegionWithResult(text: string, id = "call_1", tool = "bash") {
+  return [
+    { role: "user", content: [{ type: "text", text: "fix the failing test" }] },
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "running the log dump" },
+        { type: "toolCall", id, name: tool, arguments: { cmd: "cat big.log" } },
+      ],
+    },
+    {
+      role: "toolResult",
+      toolCallId: id,
+      toolName: tool,
+      content: [{ type: "text", text }],
+      isError: false,
+    },
+  ];
+}
+
 const base: CompactDefaults = { ...COMPACT_DEFAULTS };
 
-describe("flatten", () => {
+describe("flatten (native OMP shapes)", () => {
   it("reads text, tool_use, and tool_result blocks into one flat shape", () => {
     const [user, assistant, result] = flatten(regionWithResult("ok"));
     expect(user!.text).toBe("fix the failing test");
@@ -54,6 +82,39 @@ describe("flatten", () => {
       },
     ]);
     expect(m!.toolUses).toEqual([{ id: "c9", tool: "read", input: { p: "a" } }]);
+  });
+
+  it("reads a native toolCall block and its role:toolResult message", () => {
+    const [user, assistant, result] = flatten(nativeRegionWithResult("ok"));
+    expect(user!.text).toBe("fix the failing test");
+    expect(assistant!.toolUses).toEqual([
+      { id: "call_1", tool: "bash", input: { cmd: "cat big.log" } },
+    ]);
+    // The result body belongs to toolResults, never to the message text —
+    // otherwise the render path would re-emit it verbatim.
+    expect(result!.toolResults).toEqual([{ id: "call_1", text: "ok" }]);
+    expect(result!.text).toBe("");
+  });
+
+  it("joins native toolResult content parts that are not a single string", () => {
+    const [m] = flatten([
+      {
+        role: "toolResult",
+        toolCallId: "c1",
+        toolName: "read",
+        content: [
+          { type: "text", text: "a" },
+          { type: "text", text: "b" },
+        ],
+      },
+    ]);
+    expect(m!.toolResults).toEqual([{ id: "c1", text: "a\nb" }]);
+  });
+
+  it("keeps the text of a toolResult message that carries no toolCallId", () => {
+    const [m] = flatten([{ role: "toolResult", content: "orphan body" }]);
+    expect(m!.text).toBe("orphan body");
+    expect(m!.toolResults).toEqual([]);
   });
 
   it("joins array-form tool_result content and ignores unknown block types", () => {
@@ -250,6 +311,52 @@ describe("planCompaction", () => {
       keepResult: 0.11,
       action: "drop_result",
     });
+  });
+
+  it("REGRESSION: a native-shaped transcript yields real calls, not a no-calls defer", async () => {
+    // The shipped adapter recognised only Anthropic's tool_use/tool_result, so
+    // a real OMP region flattened to zero calls and every compaction deferred
+    // with reason "no-calls". flatten+collectCalls must see the native shape.
+    const region = nativeRegionWithResult(bigLog);
+    expect(collectCalls(flatten(region))).toHaveLength(1);
+    const out = await planCompaction({
+      region,
+      ask: asker({ call_call_1: 0.9, result_call_1: 0.05 }),
+      effective: base,
+    });
+    expect(out.kind).toBe("compacted");
+    if (out.kind !== "compacted") return;
+    expect(out.plan.dropped.map((d) => d.call.id)).toEqual(["call_1"]);
+    expect(out.plan.savedChars).toBe(bigLog.length - base.truncateHeadChars);
+  });
+
+  it("REGRESSION: a truncated native result is HELD — head kept, body recoverable", async () => {
+    const out = await planCompaction({
+      region: nativeRegionWithResult(bigLog),
+      ask: asker({ call_call_1: 0.9, result_call_1: 0.05 }),
+      effective: base,
+    });
+    if (out.kind !== "compacted") throw new Error("expected compaction");
+    const { summary } = out.plan;
+    // The head survives byte-identically...
+    expect(summary).toContain(bigLog.slice(0, base.truncateHeadChars));
+    // ...the omission is announced with the exact count...
+    expect(summary).toContain("chars omitted by jev_compact; re-run the tool to recover");
+    expect(summary).toContain(String(bigLog.length - base.truncateHeadChars));
+    // ...the full body is gone (that is the point of the reduction)...
+    expect(summary).not.toContain(bigLog);
+    // ...and the result is rendered exactly once, not twice and not zero times.
+    const notes = summary.match(/chars omitted by jev_compact/g) ?? [];
+    expect(notes).toHaveLength(1);
+  });
+
+  it("keeps a native result the model scores as still-needed, byte-identical", async () => {
+    const out = await planCompaction({
+      region: nativeRegionWithResult(bigLog),
+      ask: asker({ call_call_1: 0.9, result_call_1: 0.95 }),
+      effective: base,
+    });
+    expect(out).toMatchObject({ kind: "defer", reason: "insufficient-reduction" });
   });
 
   it("honours a custom truncate head", async () => {

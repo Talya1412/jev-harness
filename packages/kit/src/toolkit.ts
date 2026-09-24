@@ -9,6 +9,8 @@
  * - OMP (strict): `requireKey: true` — a missing key throws inside execute.
  * - Pi (fail-open): `requireKey: false` — tools catch everything and render
  *   the standard error text from results.ts instead.
+ * - Both: `redact: false` — tool input the model chose deliberately is sent
+ *   unredacted.
  *
  * Config is resolved fresh on every call so env changes between calls are
  * picked up (matches the previous per-adapter behavior).
@@ -83,7 +85,13 @@ export function createJevToolkit(
   opts: { requireKey?: boolean; fetchImpl?: typeof fetch } = {},
 ): JevToolkit {
   const config = (modelOverride?: string): JevConfig => {
-    const cfg = resolveEnvConfig({ requireKey: opts.requireKey, modelOverride });
+    const cfg = resolveEnvConfig({
+      requireKey: opts.requireKey,
+      modelOverride,
+      // A tool's state is what the model deliberately chose to submit, so it
+      // keeps full fidelity regardless of JEV_REDACT (redaction guard).
+      redact: false,
+    });
     if (opts.fetchImpl) cfg.fetchImpl = opts.fetchImpl;
     return cfg;
   };

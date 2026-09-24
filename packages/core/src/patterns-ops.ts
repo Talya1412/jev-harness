@@ -6,6 +6,7 @@
  * own labeled data (see @jev-harness/eval).
  */
 import { askJev, noul, choice, score } from "./client.js";
+import { THRESHOLDS } from "./patterns.js";
 import type { JevConfig } from "./types.js";
 
 const MAX_DIFF_CHARS = 8_000;
@@ -68,8 +69,8 @@ export async function commitGate(
     containsSecrets,
     risk,
     commit:
-      safeToCommit >= (opts.safeThreshold ?? 0.8) &&
-      containsSecrets < (opts.secretThreshold ?? 0.5),
+      safeToCommit >= (opts.safeThreshold ?? THRESHOLDS.commitSafe) &&
+      containsSecrets < (opts.secretThreshold ?? THRESHOLDS.duplicate),
   };
 }
 
@@ -203,7 +204,7 @@ export async function testPrioritizer(
 export interface SecretLeakResult {
   /** P(each ANALYZED text contains a real credential or secret), by analyzed index. */
   probabilities: number[];
-  /** Analyzed indexes scoring at or above the threshold (default 0.6). */
+  /** Analyzed indexes scoring at or above the threshold (`THRESHOLDS.secretLeak`). */
   flagged: number[];
   /** True when the input exceeded MAX_ITEMS and only the first 30 were analyzed. */
   truncated: boolean;
@@ -238,7 +239,7 @@ export async function secretLeak(
     opts.signal,
   );
   const probabilities = selected.map((_, i) => noul(response, `s${i}`));
-  const threshold = opts.threshold ?? 0.6;
+  const threshold = opts.threshold ?? THRESHOLDS.secretLeak;
   return {
     probabilities,
     flagged: probabilities.map((p, i) => (p >= threshold ? i : -1)).filter((i) => i >= 0),
@@ -290,7 +291,7 @@ export async function dedupeItems(
   );
   const duplicateIndexes: number[] = [];
   for (let i = 1; i < selected.length; i++) {
-    if (noul(response, `d${i}`) >= 0.5) duplicateIndexes.push(i);
+    if (noul(response, `d${i}`) >= THRESHOLDS.duplicate) duplicateIndexes.push(i);
   }
   const dupSet = new Set(duplicateIndexes);
   return {

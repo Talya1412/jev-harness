@@ -9,6 +9,17 @@
  * probabilities, aggregate metrics, and the suggested threshold. Commit the
  * result — packages/eval/src/regression.test.ts and the live-eval workflow
  * both treat it as the reference point.
+ *
+ * A dataset with several questions still yields ONE baseline file: the gated
+ * question (`questionIdArg`) drives the metrics, and every `choice` question
+ * in the same dataset is measured from the same responses and recorded under
+ * `choice` — the dual gate asks a noul plus a choice in one request, so one
+ * pass measures both. Use the third argument when a dataset carries several
+ * gated questions, each needing its own file:
+ *
+ *   node packages/eval/scripts/record-baseline.mjs \
+ *     packages/eval/golden/destructive-gate-dual.json destructive \
+ *     packages/eval/golden/destructive-gate-dual.baseline.json
  */
 import { writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -16,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { askJev } from "@jev-harness/core";
 import {
   binaryMetrics,
+  choiceMetrics,
   estimateCostUsd,
   invarianceDeltas,
   INPUT_USD_PER_MTOK,
@@ -54,6 +66,14 @@ if (question.type !== "noul") {
   throw new Error(`this script records noul baselines; "${questionId}" is ${question.type}`);
 }
 
+// Every `choice` question in the dataset is measured from the same responses
+// as the gated noul, so a dual gate is one recording, not two.
+const choiceQuestions = Object.entries(dataset.questions)
+  .filter(([, q]) => q.type === "choice")
+  .map(([id]) => id);
+const choiceRows = new Map(choiceQuestions.map((id) => [id, []]));
+const choicePerCase = new Map(choiceQuestions.map((id) => [id, []]));
+
 const pairs = [];
 const perCase = [];
 const bySlice = new Map();
@@ -90,6 +110,18 @@ await Promise.all(
       const label = kase.label[questionId];
       const y = label === true || label === "yes" || label === 1 ? 1 : 0;
       const slice = kase.slice ?? "core";
+      for (const cq of choiceQuestions) {
+        const a = res.answers[cq];
+        const truth = kase.label[cq];
+        if (!a || a.type !== "choice" || typeof truth !== "string") continue;
+        choiceRows.get(cq).push({ probabilities: a.probabilities ?? {}, picked: a.choice, truth });
+        choicePerCase.get(cq).push({
+          id: kase.id,
+          picked: a.choice,
+          truth,
+          ...(kase.slice ? { slice: kase.slice } : {}),
+        });
+      }
       pairs.push({ p, y });
       // slice/pair ride along so the committed baseline can be re-checked from
       // its own per-case rows (regression.test.ts recomputes, never trusts).
@@ -154,6 +186,24 @@ const baseline = {
     accuracy: atThreshold.accuracy,
   },
   slices,
+  // One block per choice question asked alongside the gated noul. Omitted when
+  // the dataset asks none, so existing single-question baselines re-record
+  // byte-identically.
+  ...(choiceQuestions.length
+    ? {
+        choice: Object.fromEntries(
+          choiceQuestions.map((cq) => [
+            cq,
+            {
+              metrics: choiceMetrics(choiceRows.get(cq)),
+              perCase: choicePerCase
+                .get(cq)
+                .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+            },
+          ]),
+        ),
+      }
+    : {}),
   invariance: invarianceDeltas(invCases, 0.2),
   sweep: sweep.rows.map((r) => ({ threshold: r.threshold, f1: r.f1, youdenJ: r.youdenJ })),
   reliability: reliabilityBins(pairs),

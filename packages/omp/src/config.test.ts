@@ -1,6 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_BASE_URL, DEFAULT_MODEL } from "@jev-harness/core";
-import { DEFAULT_TIMEOUT_MS, autoOn, envNum, readConfig, redactOn } from "../src/config.js";
+import { DEFAULT_BASE_URL, DEFAULT_MODEL, THRESHOLDS } from "@jev-harness/core";
+import {
+  DEFAULT_TIMEOUT_MS,
+  GATE_DEADLINE_MS,
+  GATE_THRESHOLD,
+  SKILL_MIN_CONFIDENCE,
+  autoOn,
+  envNum,
+  readConfig,
+  redactOn,
+  withDeadline,
+} from "../src/config.js";
+
+describe("shared thresholds", () => {
+  it("uses core's tuned numbers rather than adapter-local copies", () => {
+    // A drifted copy is exactly how the adapter once compared the wrong way
+    // round against core's default, so these must BE core's values.
+    expect(GATE_THRESHOLD).toBe(THRESHOLDS.destructiveGate);
+    expect(SKILL_MIN_CONFIDENCE).toBe(THRESHOLDS.skillRouting);
+  });
+
+  it("keeps the gate deadline safely under the host's 30s handler budget", () => {
+    // The host maps a tool_call timeout to { block: true }, so a handler that
+    // outlives its budget fails CLOSED. The deadline must leave headroom for
+    // the handler to still settle and fail open.
+    expect(GATE_DEADLINE_MS).toBeLessThan(30_000);
+    expect(GATE_DEADLINE_MS).toBeGreaterThan(1_000);
+  });
+});
 
 describe("readConfig", () => {
   it("throws a credential error when the key is absent", () => {
@@ -43,6 +70,27 @@ describe("readConfig", () => {
     expect(readConfig({ TYPESAFE_API_KEY: "k" }, undefined, true).redact).toBe(true);
     expect(readConfig({ TYPESAFE_API_KEY: "k" }, undefined, false).redact).toBe(false);
   });
+
+  it("leaves redact ABSENT when the caller does not decide", () => {
+    // Core's documented default is redaction-off, and OMP's policy is the
+    // context-dependent redactOn(). If this field were materialised from the
+    // env, a tool that deliberately keeps full fidelity would silently start
+    // sending scrubbed state.
+    expect("redact" in readConfig({ TYPESAFE_API_KEY: "k" })).toBe(false);
+    expect("redact" in readConfig({ TYPESAFE_API_KEY: "k", JEV_REDACT: "1" })).toBe(false);
+  });
+
+  it("always resolves a numeric timeout, defaulting to DEFAULT_TIMEOUT_MS", () => {
+    // Kit omits the field when unset; OMP promises a number so callers never
+    // apply core's default themselves.
+    expect(readConfig({ TYPESAFE_API_KEY: "k" }).timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
+  });
+
+  it("caps an overflowing timeout instead of letting setTimeout wrap to ~1ms", () => {
+    const huge = readConfig({ TYPESAFE_API_KEY: "k", JEV_TIMEOUT_MS: "99999999999999" });
+    expect(huge.timeoutMs).toBeLessThanOrEqual(2147483647);
+    expect(huge.timeoutMs).toBeGreaterThan(0);
+  });
 });
 
 describe("redactOn", () => {
@@ -70,6 +118,29 @@ describe("autoOn", () => {
     const env = { OMP_JEV_AUTO: "1", OMP_JEV_GATE: "0" };
     expect(autoOn(env, "OMP_JEV_GATE")).toBe(false);
     expect(autoOn(env, "OMP_JEV_SKILL_ROUTER")).toBe(true);
+  });
+});
+
+describe("withDeadline", () => {
+  it("aborts on its own deadline even when the caller passes no signal", async () => {
+    const signal = withDeadline(undefined, 20);
+    expect(signal.aborted).toBe(false);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("aborts early when the host signal aborts first", async () => {
+    const host = new AbortController();
+    const signal = withDeadline(host.signal, 10_000);
+    host.abort();
+    // The host's abort must win: a cancelled tool call cannot sit in the gate.
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("is already aborted when the host signal already is", () => {
+    const host = new AbortController();
+    host.abort();
+    expect(withDeadline(host.signal, 10_000).aborted).toBe(true);
   });
 });
 

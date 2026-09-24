@@ -47,6 +47,7 @@ environment:
 | `JEV_SKILL_CONFIDENCE`      | no       | `0.5`        | Minimum routing confidence before the advisor speaks. Also settable as the `skillConfidence` plugin `userConfig`.               |
 | `JEV_SKILLS_JSON`           | no       | —            | Inline JSON array of `{ name, description }` skill candidates.                                                                  |
 | `JEV_SKILLS_FILE`           | no       | —            | Path to a JSON file with the same shape (used when `JEV_SKILLS_JSON` is unset).                                                 |
+| `JEV_REDACT`                | no       | on           | `0` sends tool input and history to Jev unscrubbed. Use only when that state is known to be secret-free.                        |
 
 Export the plugin `userConfig` values (`apiKey`, `model`,
 `destructiveThreshold`, `skillConfidence`) as the matching environment

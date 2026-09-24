@@ -5,11 +5,61 @@ import { createJevToolkit } from "./toolkit.js";
 import { lexicalShortlist } from "./router.js";
 import type { JevResponse } from "@jev-harness/core";
 
+describe("resolveEnvConfig (adapter policy)", () => {
+  const base = {
+    TYPESAFE_BASE_URL: "https://env.test/",
+    TYPESAFE_DEFAULT_MODEL: "env-model",
+    JEV_TIMEOUT_MS: "500",
+  };
+
+  it("lets a caller's redact decision override the env, truthy or falsy", () => {
+    // A caller with a context-dependent policy must not be overridden by JEV_REDACT.
+    process.env.JEV_REDACT = "0";
+    expect(resolveEnvConfig({ redact: true }).redact).toBe(true);
+    delete process.env.JEV_REDACT;
+    expect(resolveEnvConfig({ redact: false }).redact).toBe(false);
+    expect(resolveEnvConfig().redact).toBe(true);
+  });
+
+  it("reads an injected env instead of process.env", () => {
+    const cfg = resolveEnvConfig({
+      env: { TYPESAFE_API_KEY: "  k  ", ...base },
+    });
+    expect(cfg).toMatchObject({
+      apiKey: "k",
+      baseUrl: "https://env.test",
+      model: "env-model",
+      timeoutMs: 500,
+    });
+  });
+
+  it("lets explicit overrides win over the injected env", () => {
+    const cfg = resolveEnvConfig({
+      env: { TYPESAFE_API_KEY: "env", ...base },
+      overrides: { apiKey: "override", model: "m", timeoutMs: 42, redact: false },
+    });
+    expect(cfg).toMatchObject({
+      apiKey: "override",
+      model: "m",
+      timeoutMs: 42,
+      redact: false,
+      baseUrl: "https://env.test",
+    });
+  });
+
+  it("keeps the modelOverride option as the middle precedence rung", () => {
+    process.env.TYPESAFE_DEFAULT_MODEL = "pinned";
+    const cfg = resolveEnvConfig({ modelOverride: "per-call", overrides: { apiKey: "k" } });
+    expect(cfg.model).toBe("per-call");
+  });
+});
+
 const ENV_KEYS = [
   "TYPESAFE_API_KEY",
   "TYPESAFE_BASE_URL",
   "TYPESAFE_DEFAULT_MODEL",
   "JEV_TIMEOUT_MS",
+  "JEV_REDACT",
 ] as const;
 
 // Sanitize around every test: the host machine may legitimately export these.

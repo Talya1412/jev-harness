@@ -42,14 +42,48 @@ export interface CompactCall {
   resultText: string | null;
 }
 
-/** Flatten harness messages into the flat shape the scorer reasons over. */
+/** Read a result body that is either a plain string or a list of content parts. */
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((x: any) => (typeof x === "string" ? x : typeof x?.text === "string" ? x.text : ""))
+      .filter((s) => s !== "")
+      .join("\n");
+  }
+  if (content == null) return "";
+  return JSON.stringify(content);
+}
+
+/**
+ * Flatten harness messages into the flat shape the scorer reasons over.
+ *
+ * Three spellings reach this function and all three must resolve to the same
+ * shape, because getting it wrong is invisible: the plan simply finds no calls
+ * and defers forever.
+ * - Anthropic-style blocks inside one message: `tool_use` + `tool_result`.
+ * - OMP's own blocks: `{ type: "toolCall", id, name, arguments }` in an
+ *   assistant message.
+ * - OMP's own result message: `{ role: "toolResult", toolCallId, toolName,
+ *   content }` — a WHOLE message, with no `toolUses` to pair against.
+ *
+ * The last case is why a `toolResult` message's body is routed to
+ * {@link FlatMsg.toolResults} and never to `text`: a body left in `text`
+ * would be re-emitted verbatim by the render path (defeating the truncation)
+ * and would keep {@link collectCalls} from ever seeing a result. A message
+ * with no `toolCallId` keeps its text so an unrecognised shape still loses
+ * nothing.
+ */
 export function flatten(messages: readonly unknown[]): FlatMsg[] {
   const out: FlatMsg[] = [];
   for (const raw of messages) {
-    const m = raw as Record<string, unknown>;
+    const m = (raw ?? {}) as Record<string, unknown>;
     const role = String(m.role ?? "unknown");
     const blocks = Array.isArray(m.content) ? (m.content as any[]) : [];
     const texts: string[] = [];
+    // A bare-string body is a legal spelling for user/developer/toolResult
+    // messages; dropping it would lose real conversation text.
+    if (typeof m.content === "string" && m.content !== "") texts.push(m.content);
     const toolUses: FlatMsg["toolUses"] = [];
     const toolResults: FlatMsg["toolResults"] = [];
     for (const b of blocks) {
@@ -58,21 +92,31 @@ export function flatten(messages: readonly unknown[]): FlatMsg[] {
         continue;
       }
       if (b.type === "text" && typeof b.text === "string") texts.push(b.text);
-      else if (b.type === "tool_use" || b.type === "tool_call") {
+      else if (b.type === "tool_use" || b.type === "tool_call" || b.type === "toolCall") {
         toolUses.push({
           id: String(b.id ?? b.toolCallId ?? ""),
           tool: String(b.name ?? b.toolName ?? "tool"),
-          input: b.input ?? b.args ?? {},
+          input: b.input ?? b.arguments ?? b.args ?? {},
         });
-      } else if (b.type === "tool_result") {
-        const c = b.content;
-        let tr = "";
-        if (typeof c === "string") tr = c;
-        else if (Array.isArray(c))
-          tr = c.map((x: any) => (typeof x === "string" ? x : (x?.text ?? ""))).join("\n");
-        else if (c != null) tr = JSON.stringify(c);
-        toolResults.push({ id: String(b.tool_use_id ?? b.toolUseId ?? ""), text: tr });
+      } else if (b.type === "tool_result" || b.type === "toolResult") {
+        toolResults.push({
+          id: String(b.tool_use_id ?? b.toolUseId ?? b.toolCallId ?? ""),
+          text: contentText(b.content),
+        });
       }
+    }
+    if (role === "toolResult") {
+      const id = String(m.toolCallId ?? "");
+      if (id !== "") {
+        // The body belongs to the result record, never to the message text:
+        // text here would be re-emitted verbatim by the render path.
+        toolResults.push({
+          id,
+          text: blocks.length > 0 ? contentText(m.content) : texts.join("\n"),
+        });
+        texts.length = 0;
+      }
+      // No id: keep whatever text we found, so an unrecognised shape loses nothing.
     }
     out.push({ role, text: texts.join("\n"), toolUses, toolResults });
   }
@@ -278,47 +322,53 @@ export async function planCompaction(prep: CompactionPrep): Promise<CompactionOu
   }
 
   const truncById = new Map(dropped.map((d) => [d.call.id, d.call] as const));
+
+  /**
+   * Render one tool result. The head is always kept; the tail is replaced by a
+   * note naming the recovered size. Two things matter here and both used to be
+   * wrong:
+   * - the head is taken from `resultText` when the region carried a body and
+   *   from the rendered text otherwise, so a result whose body never reached
+   *   this map is HELD (head + note) rather than dropped or replaced by a bare
+   *   marker;
+   * - the note is part of the returned string, never a falsy part of a
+   *   `filter(Boolean)` list, so truncation can never silently delete output.
+   */
+  const renderResult = (id: string, fallback: string): string => {
+    const t = truncById.get(id);
+    if (!t) return "[tool_result id=" + id + "] " + fallback;
+    const head = prep.effective.truncateHeadChars;
+    const body = t.resultText ?? fallback;
+    const omitted = Math.max(0, body.length - head);
+    return (
+      "[tool_result id=" +
+      id +
+      "] " +
+      body.slice(0, head) +
+      (omitted > 0
+        ? "\n[..." + omitted + " chars omitted by jev_compact; re-run the tool to recover]"
+        : "")
+    );
+  };
+
+  // A result id carried by its own message is rendered there, once. The inline
+  // branch below exists only for the Anthropic block spelling, where a
+  // truncated result would otherwise be announced without its head.
+  const carried = new Set<string>();
+  for (const m of flat) for (const r of m.toolResults) carried.add(r.id);
+
   const render = (msgs: readonly FlatMsg[]): string =>
     msgs
       .map((m) => {
         const parts: string[] = [];
-        if (m.text) parts.push(m.text);
+        for (const r of m.toolResults) parts.push(renderResult(r.id, r.text));
         for (const u of m.toolUses) {
-          const t = truncById.get(u.id);
           parts.push(
             "[tool_use id=" + u.id + " name=" + u.tool + " input=" + JSON.stringify(u.input) + "]",
           );
-          if (t && t.resultText != null) {
-            const full: string = t.resultText;
-            parts.push(
-              "[tool_result id=" +
-                u.id +
-                "] " +
-                full.slice(0, prep.effective.truncateHeadChars) +
-                "\n[..." +
-                (t.resultChars - prep.effective.truncateHeadChars) +
-                " chars omitted by jev_compact; re-run the tool to recover]",
-            );
-          }
+          if (!carried.has(u.id) && truncById.has(u.id)) parts.push(renderResult(u.id, ""));
         }
-        for (const r of m.toolResults) {
-          if (m.toolUses.some((w) => w.id === r.id)) continue;
-          const t = truncById.get(r.id);
-          if (t && t.resultText != null) {
-            const full: string = t.resultText;
-            parts.push(
-              "[tool_result id=" +
-                r.id +
-                "] " +
-                full.slice(0, prep.effective.truncateHeadChars) +
-                "\n[..." +
-                (t.resultChars - prep.effective.truncateHeadChars) +
-                " chars omitted by jev_compact]",
-            );
-          } else {
-            parts.push("[tool_result id=" + r.id + "] " + r.text);
-          }
-        }
+        if (m.text) parts.unshift(m.text);
         return parts.filter(Boolean).join("\n");
       })
       .filter(Boolean)

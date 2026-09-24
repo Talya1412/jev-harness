@@ -37,7 +37,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@jev-harness/core": "*"
+    "@jev-harness/core": "*",
+    "@jev-harness/kit": "*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

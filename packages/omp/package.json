@@ -32,6 +32,10 @@
     "test": "vitest run --passWithNoTests",
     "bundle": "node scripts/bundle.mjs"
   },
+  "dependencies": {
+    "@jev-harness/core": "*",
+    "@jev-harness/kit": "*"
+  },
   "peerDependencies": {
     "@oh-my-pi/pi-coding-agent": "*"
   },
@@ -52,7 +56,12 @@
       "OMP_JEV_MAX_STATE_TOKENS": "Compaction state budget. Default 25000.",
       "OMP_JEV_MAX_REQUEST_TOKENS": "Compaction per-request budget. Default 30000.",
       "OMP_JEV_TRUNCATE_HEAD": "Kept head chars for truncated tool results. Default 300.",
-      "OMP_JEV_MIN_REDUCTION": "Minimum saved/total char ratio before returning a compaction. Default 0.25."
+      "OMP_JEV_MIN_REDUCTION": "Minimum saved/total char ratio before returning a compaction. Default 0.25.",
+      "OMP_JEV_MAX_CALLS_PER_MIN": "Rolling per-minute cap on Jev requests across tools and hooks. Default 120. Set to 0 to disable the cap.",
+      "OMP_JEV_CACHE_DIR": "Directory for the cross-session judgment cache. Default ~/.omp/cache/jev-harness.",
+      "OMP_JEV_CACHE_TTL_MS": "How long a cached judgment stays valid, in ms. Default 86400000 (1 day).",
+      "OMP_JEV_DECISION_LOG": "Path to a JSONL file to append every gate decision to. Unset keeps decisions in memory only.",
+      "OMP_JEV_REDACT": "1 redacts secrets in ALL state, 0 disables redaction everywhere. Unset redacts hook state only; tools send full fidelity."
     }
   },
   "keywords": [

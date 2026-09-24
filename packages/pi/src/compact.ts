@@ -3,9 +3,9 @@
  *
  * Kept free of ExtensionAPI and network access so the pairing and truncation
  * logic — the part that decides what the model actually sees after a
- * compaction — can be tested directly.
+ * compaction — can be tested directly. Config resolution lives in the kit
+ * (see ./config.ts); nothing here touches process.env.
  */
-import type { JevConfig } from "@jev-harness/core";
 
 /** Shared with the OMP adapter: pairs below this keep-score are stale. */
 export const DEFAULT_KEEP_THRESHOLD = 0.2;
@@ -21,18 +21,6 @@ export interface ToolPair {
   tool: string;
   argsText: string;
   resultText: string;
-}
-
-/** Read the Jev client config from `process.env`, leaving defaults unset. */
-export function resolveJevConfig(env: Record<string, string | undefined>): JevConfig {
-  const timeoutRaw = Number(env.JEV_TIMEOUT_MS ?? "");
-  const config: JevConfig = { apiKey: env.TYPESAFE_API_KEY ?? "" };
-  const baseUrl = (env.TYPESAFE_BASE_URL ?? "").trim();
-  if (baseUrl) config.baseUrl = baseUrl;
-  const model = (env.TYPESAFE_DEFAULT_MODEL ?? "").trim();
-  if (model) config.model = model;
-  if (Number.isFinite(timeoutRaw) && timeoutRaw > 0) config.timeoutMs = timeoutRaw;
-  return config;
 }
 
 /**

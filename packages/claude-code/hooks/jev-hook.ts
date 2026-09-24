@@ -34,6 +34,7 @@ import {
   type JevConfig,
   type SkillCandidate,
 } from "@jev-harness/core";
+import { resolveEnvConfig } from "@jev-harness/kit";
 import {
   DEFAULT_DESTRUCTIVE_THRESHOLD,
   DEFAULT_SKILL_CONFIDENCE,
@@ -44,14 +45,16 @@ import {
   skillPayload,
 } from "./decisions.js";
 
-function buildConfig(): JevConfig | null {
-  const apiKey = process.env.TYPESAFE_API_KEY;
-  if (!apiKey) return null;
-  const config: JevConfig = { apiKey, redact: true };
-  if (process.env.TYPESAFE_BASE_URL) config.baseUrl = process.env.TYPESAFE_BASE_URL;
-  if (process.env.TYPESAFE_DEFAULT_MODEL) config.model = process.env.TYPESAFE_DEFAULT_MODEL;
-  const timeoutMs = parseNumber(process.env.JEV_TIMEOUT_MS, NaN);
-  if (Number.isFinite(timeoutMs) && timeoutMs > 0) config.timeoutMs = timeoutMs;
+/**
+ * Hook config, or null when no key is set (the caller then stays silent).
+ *
+ * The env rule itself is the kit's. The hook's own policy: redact tool input
+ * and history by default, and render `JEV_REDACT=0` as an ABSENT field — core's
+ * documented default — rather than `redact: false`.
+ */
+function hookConfig(): JevConfig | null {
+  if (!(process.env.TYPESAFE_API_KEY ?? "").trim()) return null;
+  const config = resolveEnvConfig({ requireKey: true, redact: true });
   if ((process.env.JEV_REDACT ?? "").trim() === "0") delete config.redact;
   return config;
 }
@@ -82,7 +85,7 @@ async function runPreToolUse(input: Record<string, unknown>): Promise<void> {
   try {
     const toolName = typeof input.tool_name === "string" ? input.tool_name : "";
     if (!GATED_TOOLS.has(toolName)) allow();
-    const config = buildConfig();
+    const config = hookConfig();
     if (!config) allow();
     const threshold = parseNumber(
       process.env.JEV_DESTRUCTIVE_THRESHOLD,
@@ -130,7 +133,7 @@ async function runUserPromptSubmit(input: Record<string, unknown>): Promise<void
     if (prompt.trim() === "") allow();
     const skills = loadSkills();
     if (skills.length === 0) allow();
-    const config = buildConfig();
+    const config = hookConfig();
     if (!config) allow();
     const minConfidence = parseNumber(process.env.JEV_SKILL_CONFIDENCE, DEFAULT_SKILL_CONFIDENCE);
     const routed = await routeSkill(config as JevConfig, prompt, skills, { minConfidence });

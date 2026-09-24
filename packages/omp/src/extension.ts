@@ -6,15 +6,22 @@
  * which owns retries, timeouts, and the typed answer accessors.
  *
  * Tools (always registered, called on demand):
- * - 'jev_ask': typed noul/choice/score questions over an arbitrary state.
- * - 'jev_models': list the System One models available to the key.
- * - 'jev_route_skills': rank the skill roster against a task (advisory).
- * - 'jev_browse_action': pick the next browser action from a snapshot (advisory).
- * - 'jev_pick_tool': pick one tool for a task + flag confirmation (advisory).
+ * - 'jev': ONE advisory tool whose `mode` parameter selects the pattern —
+ *   `route_skills` (rank the skill roster against a task), `browse_action`
+ *   (next browser action from a snapshot), `pick_tool` (one tool for a task,
+ *   plus a confirmation flag).
+ *
+ * Why one tool: the three modes share a shape (state in, ranked judgment out)
+ * and carry large schemas, and OMP mounts a 'discoverable' tool under `xd://`
+ * or BM25 search rather than the top-level schema — so one tool costs one
+ * entry in that surface instead of three. Nothing here re-implements OMP's
+ * native `eval` prelude (`judge()` / `judge_batch()`) or
+ * `omp models typesafe`, which is why the old `jev_ask` and `jev_models`
+ * tools were removed.
  *
  * Hooks (all require 'OMP_JEV_AUTO=1', each with its own off-switch):
- * - 'tool_call': destructive gate, fail-open.
- * - 'input': skill suggestion as append-only additionalContext.
+ * - 'tool_call': destructive gate — dual gate with a confirm path, fail-open.
+ * - 'before_agent_start': skill suggestion, delivered as a custom message.
  * - 'session_before_compact': verbatim compaction, fail-open.
  *
  * Auth: TYPESAFE_API_KEY from the environment (never hardcoded, never logged).
@@ -24,30 +31,38 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
-  askJev,
   chooseBrowserAction,
   createBudgetGuard,
   createDecisionLog,
   createPersistentCache,
   decisionDigest,
-  judgeDestructive,
+  judgeDestructiveDual,
   jsonlSink,
-  listJevModels,
   pickTool,
   routeSkill,
   withPersistentCache,
   type JevConfig,
-  type Questions,
 } from "@jev-harness/core";
 import {
+  GATE_DEADLINE_MS,
   GATE_THRESHOLD,
   SKILL_MIN_CONFIDENCE,
   autoOn,
   envNum,
   readConfig,
   redactOn,
+  withDeadline,
 } from "./config.js";
 import { COMPACT_DEFAULTS, jevAsker, planCompaction, type CompactDefaults } from "./compact.js";
+import { createTracedLedger, decideOnFailure, reportFailure } from "./failure.js";
+import {
+  MIN_PROMPT_CHARS,
+  createSkillRouter,
+  defaultSkillDirs,
+  loadSkillRoster,
+  skillHint,
+  userAlreadyChose,
+} from "./router.js";
 
 /** `process.env` bound once, so the pure helpers stay testable. */
 const ENV = process.env;
@@ -81,113 +96,85 @@ const gateLog = createDecisionLog(
     : {},
 );
 
+/**
+ * Refusals and abstains, so a declined action leaves a trail. A gate block, a
+ * routing abort, and a compaction deferral are decisions whose reason the model
+ * never sees; without this they simply vanish. When OMP_JEV_DECISION_LOG is
+ * set, each distinct refusal is also appended there as one JSON line — the same
+ * file the gate's decision log uses — so the trace survives the process.
+ */
+const refusals = createTracedLedger(ENV.OMP_JEV_DECISION_LOG);
+
+/**
+ * Set once an `auth` or `model` failure proves the configured key/model
+ * cannot work. Every later call fails identically while still spending the host
+ * handler's latency budget, so the hooks stand down until the process restarts.
+ * A non-fatal failure never sets it, so a transient blip cannot disable Jev.
+ */
+let sessionDisabled = false;
+
+/** Skill roster + scheduling, per session (the roster is read once per turn). */
+const skillRouter = createSkillRouter({
+  judge: async (text, candidates) => {
+    const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
+    const result = await routeSkill(cfg, text, candidates, {
+      minConfidence: SKILL_MIN_CONFIDENCE,
+      maxCandidates: candidates.length,
+    });
+    return { skill: result.skill, confidence: result.confidence };
+  },
+});
+
 export default function jevExtension(pi: ExtensionAPI): void {
   const z = pi.zod;
 
-  const questionSchema = z
-    .object({
-      type: z.enum(["noul", "choice", "score"]).describe("Question primitive"),
-      instructions: z.string().describe("The single narrow judgment to make"),
-      criteria: z
-        .union([z.array(z.string()), z.record(z.string(), z.string())])
-        .optional()
-        .describe("For choice: {key: description}. For score: ordered [low..high] levels."),
-    })
-    .passthrough();
-
   pi.registerTool({
-    name: "jev_ask",
-    label: "Jev Ask",
+    name: "jev",
+    label: "Jev",
     description:
-      "Ask TypeSafe's Jev (System One) typed questions about a state and get calibrated probabilities. " +
-      "questions is a map of id -> {type: 'noul'|'choice'|'score', instructions, criteria?}. " +
-      "noul returns P(yes); choice returns the winning key + probabilities + confidence; score returns a " +
-      "probability-weighted level. Use for routing, ranking, extraction, verification, and confidence-gated " +
-      "decisions where code needs semantic judgment rather than generated text.",
-    parameters: z.object({
-      state: z
-        .union([z.string(), z.record(z.string(), z.any()), z.array(z.any())])
-        .describe(
-          "The content to judge — text, or a JSON object with named fields referenced by backticked paths.",
-        ),
-      questions: z
-        .record(z.string(), questionSchema)
-        .describe("Map of question id -> question definition."),
-      model: z.string().optional().describe("Override model (default jev-latest)."),
-    }),
-    loadMode: "essential",
-    approval: "read",
-    async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = jevConfig(params.model, redactOn(ENV, "tool"));
-      const result = await askJev(
-        cfg,
-        params.state,
-        params.questions as unknown as Questions,
-        signal ?? undefined,
-      );
-      return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        details: result,
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "jev_models",
-    label: "Jev Models",
-    description: "List the TypeSafe System One models available to the configured API key.",
-    parameters: z.object({}),
-    loadMode: "essential",
-    approval: "read",
-    async execute(_id: string, _params: any, _signal?: AbortSignal) {
-      const cfg = jevConfig();
-      const models = await listJevModels(cfg);
-      const text = JSON.stringify(models, null, 2);
-      return { content: [{ type: "text", text }], details: { models } };
-    },
-  });
-
-  pi.registerTool({
-    name: "jev_route_skills",
-    label: "Jev Route Skills",
-    description:
-      "Rank the installed skill roster against a task description using one Jev call. " +
-      "Pass the task text and the candidate skill names; returns a relevance ranking plus a " +
-      "no-skill-needed probability. Advisory: decide from the result, do not blindly load the top hit.",
+      "Ask TypeSafe's Jev (System One) for one narrow, calibrated judgment over a state, then act on the " +
+      "probability in code. Pick mode: 'route_skills' ranks skill names against a task (returns the best " +
+      "name, or null to abstain); 'browse_action' picks the next browser operation from a page snapshot; " +
+      "'pick_tool' picks one tool for a task and flags whether it needs confirmation. Every mode is ADVISORY " +
+      "— it returns a decision, it never executes anything, and you must validate the choice before acting " +
+      "(an element index against the live snapshot, a tool name against the real roster). " +
+      "For typed questions you want to ask yourself (noul/choice/score over arbitrary state), use the " +
+      "native judge() prelude inside eval — it is the same model and needs no tool call.",
     loadMode: "discoverable",
-    parameters: z.object({
-      task: z.string().describe("The user's task or first message to route."),
-      skills: z.array(z.string()).describe("Candidate skill names to rank."),
-    }),
     approval: "read",
-    async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = jevConfig(undefined, redactOn(ENV, "tool"));
-      const result = await routeSkill(
-        cfg,
-        params.task,
-        params.skills.map((name: string) => ({ name })),
-        { signal: signal ?? undefined },
-      );
-      const hint =
-        result.skill !== null
-          ? "Consider loading skill: " + result.skill
-          : "No listed skill is relevant.";
-      return {
-        content: [{ type: "text", text: hint + "\n\n" + JSON.stringify(result, null, 2) }],
-        details: result,
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "jev_browse_action",
-    label: "Jev Browse Goal",
-    description:
-      "Given a goal and a numbered element table from a page snapshot, ask Jev to pick the single next browser action. " +
-      "Returns the operation plus the chosen target. " +
-      "ADVISORY: this tool does not execute anything — validate the returned index against the live snapshot and act in code.",
     parameters: z.object({
-      goal: z.string().describe("What the user wants to achieve on the page."),
+      mode: z
+        .enum(["route_skills", "browse_action", "pick_tool"])
+        .describe("Which judgment to make."),
+      task: z
+        .string()
+        .optional()
+        .describe("route_skills / pick_tool: the task, request, or question to judge."),
+      skills: z
+        .array(z.object({ name: z.string(), description: z.string().optional() }))
+        .optional()
+        .describe(
+          "route_skills: candidate skills to rank. Descriptions matter — without them a browser task " +
+            "routes to a desktop-automation skill.",
+        ),
+      tools: z
+        .array(
+          z.object({
+            name: z.string(),
+            description: z.string(),
+            args: z
+              .record(z.string(), z.string())
+              .optional()
+              .describe("Map of arg name -> type/description, for closed-set args."),
+          }),
+        )
+        .optional()
+        .describe("pick_tool: candidate tools to choose from."),
+      context: z
+        .string()
+        .optional()
+        .describe("pick_tool: extra context, e.g. a recent error or the file being worked on."),
+      goal: z.string().optional().describe("browse_action: what the user wants on the page."),
       elements: z
         .array(
           z.object({
@@ -204,10 +191,12 @@ export default function jevExtension(pi: ExtensionAPI): void {
               .describe("Operations this element supports, e.g. ['CLICK','TYPE_TEXT']."),
           }),
         )
-        .describe("Numbered interactive elements from the current snapshot."),
+        .optional()
+        .describe("browse_action: numbered interactive elements from the current snapshot."),
       page: z
         .object({ url: z.string(), title: z.string().optional(), text: z.string().optional() })
-        .describe("Current page context."),
+        .optional()
+        .describe("browse_action: current page context."),
       recent_actions: z
         .array(
           z.object({
@@ -217,66 +206,56 @@ export default function jevExtension(pi: ExtensionAPI): void {
           }),
         )
         .optional()
-        .describe("Last few actions taken."),
+        .describe("browse_action: last few actions taken."),
     }),
-    loadMode: "discoverable",
-    approval: "read",
-    async execute(_id: string, params: any, signal?: AbortSignal) {
+    async execute(
+      _id: string,
+      params: any,
+      signal?: AbortSignal,
+    ): Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }> {
+      const abort = signal ?? undefined;
       const cfg = jevConfig(undefined, redactOn(ENV, "tool"));
-      const result = await chooseBrowserAction(
-        cfg,
-        {
-          goal: params.goal,
-          page: params.page,
-          elements: params.elements,
-          recentActions: (params.recent_actions ?? []).map((r: any) => ({
-            action: String(r?.action ?? ""),
-            kind: r?.kind,
-            pageChanged: r?.page_changed,
-          })),
-        },
-        { signal: signal ?? undefined },
-      );
-      return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        details: result,
-      };
-    },
-  });
+      const text = (value: unknown) => JSON.stringify(value, null, 2);
 
-  pi.registerTool({
-    name: "jev_pick_tool",
-    label: "Jev Pick Tool",
-    description:
-      "Given a task and a list of candidate tools with their schemas, ask Jev which single tool to use and whether it needs confirmation. " +
-      "Best when the candidate set is enumerable (few tools, closed-set args). ADVISORY: this does not execute the tool.",
-    parameters: z.object({
-      task: z.string().describe("What the user is asking for."),
-      tools: z
-        .array(
-          z.object({
-            name: z.string(),
-            description: z.string(),
-            args: z
-              .record(z.string(), z.string())
-              .optional()
-              .describe("Map of arg name -> type/description, for closed-set args."),
-          }),
-        )
-        .describe("Candidate tools to choose from."),
-      context: z
-        .string()
-        .optional()
-        .describe("Extra context, e.g. recent error or file being worked on."),
-    }),
-    loadMode: "discoverable",
-    approval: "read",
-    async execute(_id: string, params: any, signal?: AbortSignal) {
-      const cfg = jevConfig(undefined, redactOn(ENV, "tool"));
+      if (params.mode === "route_skills") {
+        const candidates = (params.skills ?? []) as Array<{ name: string; description?: string }>;
+        const result = await routeSkill(cfg, String(params.task ?? ""), candidates, {
+          signal: abort,
+        });
+        const out = {
+          skill: result.skill,
+          confidence: result.confidence,
+          probabilities: result.probabilities,
+          hint:
+            result.skill === null
+              ? "No listed skill is relevant."
+              : "Consider loading skill: " + result.skill,
+        };
+        return { content: [{ type: "text", text: text(out) }], details: out };
+      }
+
+      if (params.mode === "browse_action") {
+        const result = await chooseBrowserAction(
+          cfg,
+          {
+            goal: String(params.goal ?? ""),
+            page: params.page ?? { url: "" },
+            elements: params.elements ?? [],
+            recentActions: (params.recent_actions ?? []).map((r: any) => ({
+              action: String(r?.action ?? ""),
+              kind: r?.kind,
+              pageChanged: r?.page_changed,
+            })),
+          },
+          { signal: abort },
+        );
+        return { content: [{ type: "text", text: text(result) }], details: result };
+      }
+
       const result = await pickTool(
         cfg,
-        { task: params.task, tools: params.tools, context: params.context },
-        { signal: signal ?? undefined },
+        { task: String(params.task ?? ""), tools: params.tools ?? [], context: params.context },
+        { signal: abort },
       );
       const out = {
         tool: result.tool,
@@ -285,32 +264,37 @@ export default function jevExtension(pi: ExtensionAPI): void {
         confirm_required: result.confirmRequired,
         act: result.act,
       };
-      return {
-        content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
-        details: out,
-      };
+      return { content: [{ type: "text", text: text(out) }], details: out };
     },
   });
-
   // ---- Selective auto-Jev hooks (opt-in via OMP_JEV_AUTO=1) -----------------
   // Why opt-in: these spend a Jev call per qualifying event. Cheap but latency
   // is real (~200-400ms), so the user enables it deliberately. Each hook is
   // independently gated so one can be turned off.
 
   // Gate 1 — tool_call: block a tool call Jev judges dangerous before it runs.
-  // Fail-open on any error: a Jev outage must never freeze the agent.
-  pi.on("tool_call", async (event: any) => {
-    if (!autoOn(ENV, "OMP_JEV_GATE")) return;
+  //
+  // Two independent fail-open mechanisms, because this handler runs under a host
+  // budget that fails CLOSED:
+  // 1. every path including the logger resolves without throwing, and
+  // 2. the judgment is bounded by a self-imposed deadline (GATE_DEADLINE_MS)
+  //    combined with the host signal the handler receives.
+  // OMP reports a 'tool_call' handler that throws OR never settles as
+  // { block: true } (runner.ts maps both the timeout and the error case), so the
+  // deadline is what keeps a slow Jev call from freezing every mutating tool.
+  // The catch below turns the resulting abort into "allow".
+  pi.on("tool_call", async (event: any, ctx: any) => {
+    if (!autoOn(ENV, "OMP_JEV_GATE") || sessionDisabled) return;
     try {
       const name = String(event?.toolName ?? "");
       // Only adjudicate tools that can mutate the world; cheap reads skip the call.
       if (!/^(bash|write|edit|delete|move|rm|mcp__)/i.test(name)) return;
       const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
       const startedAt = Date.now();
-      const verdict = await judgeDestructive(
+      const verdict = await judgeDestructiveDual(
         cfg,
         { tool: name, input: event?.input ?? {}, cwd: process.cwd() },
-        { threshold: GATE_THRESHOLD },
+        { threshold: GATE_THRESHOLD, signal: withDeadline(ctx?.signal, GATE_DEADLINE_MS) },
       );
       gateLog.record({
         ts: new Date().toISOString(),
@@ -318,101 +302,125 @@ export default function jevExtension(pi: ExtensionAPI): void {
         model: cfg.model ?? "unknown",
         digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, [
           "destructive",
+          "category",
         ]),
-        answers: { destructive: verdict.destructive },
+        answers: { destructive: verdict.destructive, category: verdict.category },
         threshold: GATE_THRESHOLD,
-        action: verdict.blocked ? "block" : "allow",
+        action: verdict.decision,
         latencyMs: Date.now() - startedAt,
       });
-      if (verdict.blocked) {
+      if (verdict.decision === "allow") return;
+
+      // 'confirm' is a genuine-but-unproven case: the noul was high but the
+      // category disagreed, abstained, or was low-confidence. A bare refusal
+      // would strand the model (this is how a plain python3 script.py was
+      // blocked with no way forward), so the reason names the legal move:
+      // re-issue the SAME call once the user has confirmed it explicitly.
+      refusals.record("gate:" + name, verdict.decision + ":" + verdict.category);
+      if (verdict.decision === "block") {
         return {
           block: true,
           reason:
-            "jev gate: destructive effect likely (" +
+            "jev gate: destructive (" +
             verdict.destructive.toFixed(2) +
-            "). Re-issue with explicit confirmation or adjust the command.",
+            ", category=" +
+            verdict.category +
+            "). The tool alone cannot undo this. If the user has explicitly asked for it, re-issue " +
+            "the same call with that confirmation stated in the task; otherwise use a safer equivalent " +
+            "(delete the specific path, not a glob) or ask the user first.",
         };
       }
+      return {
+        block: true,
+        reason:
+          "jev gate: possibly destructive but UNPROVEN (" +
+          verdict.destructive.toFixed(2) +
+          ", category=" +
+          verdict.category +
+          ", confidence=" +
+          verdict.confidence.toFixed(2) +
+          "). Ask the user to confirm this exact call; if they confirm, state that confirmation and " +
+          "re-issue it unchanged.",
+      };
     } catch (err) {
-      // CRITICAL: a 'tool_call' handler that throws blocks the tool (fail-closed).
-      // Any Jev failure must therefore resolve to "allow" — never let the gate
-      // become a single point of failure for every mutating action. The logger
-      // call itself is guarded for the same reason.
-      try {
-        pi.logger.warn("jev gate: allowed on error (fail-open)", { error: String(err) });
-      } catch {
-        // Logger unavailable — still allow.
-      }
+      // Fail open, but not SILENTLY: the failure kind decides whether the
+      // adapter keeps spending calls this session (auth/model) or shrugs off a
+      // transient blip. A logger throw must not become a block either.
+      const decision = decideOnFailure(err, "gate");
+      const { disabled } = reportFailure(pi.logger, decision);
+      if (disabled) sessionDisabled = true;
+      refusals.record("gate:error", decision.kind);
       return; // allow
     }
   });
 
-  // Gate 2 — input: silently suggest a skill for the incoming message.
-  // Advisory only: injects ONE line, never blocks, never loads anything itself.
-  // Append-only: returns additionalContext and never rewrites the system prefix,
-  // so the provider prompt-cache prefix stays intact between turns.
-  (pi.on as (name: string, handler: (event: any, ctx: any) => unknown) => void)(
-    "input",
-    async (event: any, ctx: any) => {
-      if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER")) return;
-      try {
-        const text = String(event?.text ?? event?.prompt ?? "");
-        if (text.length < 12) return;
-        let roster: Array<{ name: string; description: string }> = [];
-        try {
-          roster = ((ctx?.skills ?? []) as Array<any>)
-            .map((s) => ({
-              name: String(s?.name ?? ""),
-              description: String(s?.description ?? ""),
-            }))
-            .filter((s) => s.name !== "");
-        } catch {
-          roster = [];
-        }
-        if (roster.length === 0) return;
-        // Cheap lexical prefilter keeps the choice set small before spending a call.
-        const lower = text.toLowerCase();
-        const scored = roster.map((s) => {
-          const parts = s.name.toLowerCase().split(/[-_]/);
-          let score = 0;
-          for (const part of parts) {
-            if (part.length > 3 && lower.includes(part)) score += 2;
-            // also match the acronym form: fh6-modding -> "fh6"
-            if (part.length <= 4 && lower.includes(part)) score += 1;
-          }
-          return { name: s.name, score };
-        });
-        const lexical = scored.filter((x) => x.score > 0).map((x) => x.name);
-        // If nothing matched lexically, still give Jev the roster when it is small
-        // enough for a choice; otherwise abstain rather than spend a weak call.
-        const shortlist = (lexical.length > 0 ? lexical : roster.map((s) => s.name)).slice(0, 12);
-        if (shortlist.length === 0) return;
-        // Names alone are ambiguous, so send a one-line description per candidate
-        // (core builds the choice criteria from these).
-        const byName = new Map<string, string>();
-        for (const s of roster) {
-          byName.set(s.name, s.description.replace(/\s+/g, " ").slice(0, 180));
-        }
-        const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
-        const result = await routeSkill(
-          cfg,
-          text,
-          shortlist.map((name) => ({ name, description: byName.get(name) ?? "" })),
-          { minConfidence: SKILL_MIN_CONFIDENCE, maxCandidates: 12 },
-        );
-        if (result.skill !== null) {
-          return { additionalContext: "[jev] Consider loading skill: " + result.skill };
-        }
-      } catch (err) {
-        try {
-          pi.logger.debug("jev skill router skipped", { error: String(err) });
-        } catch {
-          // Logger unavailable — skip silently.
-        }
+  // Gate 2 — skill router: suggest ONE skill for the incoming prompt.
+  //
+  // Two things were wrong with the previous wiring and both are fixed by
+  // construction here:
+  // - the roster came from ctx.skills, a member that does not exist on OMP's
+  //   ExtensionContext, so the hook could never see a candidate. It now reads
+  //   the same skill directories OMP's own discovery scans (router.ts).
+  // - the suggestion was returned as { additionalContext }, which is NOT a
+  //   field of InputEventResult (its fields are handled/text/images), so a
+  //   suggestion could never reach the model. It now travels as a custom
+  //   before_agent_start message, which the host converts into a developer
+  //   message for the request.
+  //
+  // Why before_agent_start and not 'input': 'input' fires only in interactive
+  // mode and its result cannot inject text. Routing is debounced, single-flight
+  // and cached (router.ts), so a burst of prompts costs at most one call.
+  let pendingHint: string | null = null;
+  pi.on("input", async (event: any, ctx: any) => {
+    if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER") || sessionDisabled) return;
+    try {
+      const text = String(event?.text ?? event?.prompt ?? "");
+      if (text.length < MIN_PROMPT_CHARS) return;
+      const roster = loadSkillRoster(defaultSkillDirs(ctx?.cwd ?? process.cwd()));
+      if (roster.length === 0) {
+        refusals.record("router:roster", "empty-roster");
         return;
       }
-    },
-  );
+      // The user already named a skill: promote nothing, override nobody.
+      if (userAlreadyChose(text, roster)) {
+        refusals.record("router:user-selected", "already-chosen");
+        return;
+      }
+      const answer = await skillRouter.route(text, roster);
+      if (answer === null) {
+        refusals.record("router", "superseded-or-debounced");
+        return;
+      }
+      if (answer.skill === null) {
+        refusals.record("router:abstain", "below-confidence");
+        return;
+      }
+      const hint = skillHint(answer);
+      if (hint !== null) pendingHint = hint;
+    } catch (err) {
+      const decision = decideOnFailure(err, "skill router");
+      const { disabled } = reportFailure(pi.logger, decision);
+      if (disabled) sessionDisabled = true;
+      refusals.record("router:error", decision.kind);
+    }
+  });
+
+  // The hint is delivered on the NEXT turn's request context. It never rewrites
+  // the system prompt, so the provider prompt-cache prefix is untouched, and it
+  // is consumed once so it cannot repeat every turn.
+  pi.on("before_agent_start", async () => {
+    if (pendingHint === null) return;
+    const hint = pendingHint;
+    pendingHint = null;
+    return {
+      message: {
+        customType: "jev-skill-hint",
+        content: hint,
+        display: false,
+        attribution: "agent" as const,
+      },
+    };
+  });
 
   // ---- Verbatim compaction --------------------------------------------------
   // Why this shape: a summary is lossy — a path, exact error, or constraint can
@@ -487,14 +495,12 @@ export default function jevExtension(pi: ExtensionAPI): void {
         },
       };
     } catch (err) {
-      // Fail open — native compaction must still happen.
-      try {
-        pi.logger.warn("jev_compact failed, falling back to native compaction", {
-          error: String(err),
-        });
-      } catch {
-        // Logger unavailable — fall back silently.
-      }
+      // Fail open — native compaction must still happen — but say why, and
+      // stand down for the session when the key or model is the problem.
+      const decision = decideOnFailure(err, "compact");
+      const { disabled } = reportFailure(pi.logger, decision);
+      if (disabled) sessionDisabled = true;
+      refusals.record("compact:error", decision.kind);
       return;
     }
   });

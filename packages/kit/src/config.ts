@@ -1,10 +1,17 @@
 /**
  * Resolve the Jev client config from the environment — the shared rule for
  * every adapter: TYPESAFE_API_KEY (required or optional), TYPESAFE_BASE_URL,
- * TYPESAFE_DEFAULT_MODEL, JEV_TIMEOUT_MS. The key is never hardcoded and
- * never logged.
+ * TYPESAFE_DEFAULT_MODEL, JEV_TIMEOUT_MS, JEV_REDACT. The key is never
+ * hardcoded and never logged.
+ *
+ * Adapter-specific policy is passed in, never guessed here: a caller whose
+ * redaction rule depends on context (hooks redact tool input and history,
+ * an explicit jev_ask keeps full fidelity) supplies `redact`.
  */
 import { DEFAULT_BASE_URL, DEFAULT_MODEL, type JevConfig } from "@jev-harness/core";
+
+/** Environment source. Defaults to `process.env`; tests inject a plain map. */
+export type Env = Record<string, string | undefined>;
 
 export interface ResolveEnvConfigOptions {
   /** Per-call model override (wins over TYPESAFE_DEFAULT_MODEL). */
@@ -15,6 +22,16 @@ export interface ResolveEnvConfigOptions {
    * caller's fail-open handling applies.
    */
   requireKey?: boolean;
+  /**
+   * This caller's redaction decision, overriding the `JEV_REDACT !== "0"`
+   * default. A caller that renders "off" as an absent field (core's documented
+   * default) drops the field itself after the fact.
+   */
+  redact?: boolean;
+  /** Explicit overrides for apiKey/baseUrl/model/timeoutMs/redact; win over the env. */
+  overrides?: Partial<JevConfig>;
+  /** Environment source; defaults to `process.env`. */
+  env?: Env;
 }
 
 /** Largest timeout Node's setTimeout honours; larger values overflow to ~1ms. */
@@ -33,7 +50,9 @@ export function parseTimeoutMs(raw: string | undefined): number | undefined {
 }
 
 export function resolveEnvConfig(opts: ResolveEnvConfigOptions = {}): JevConfig {
-  const apiKey = (process.env.TYPESAFE_API_KEY ?? "").trim();
+  const env = opts.env ?? process.env;
+  const overrides = opts.overrides ?? {};
+  const apiKey = (overrides.apiKey ?? env.TYPESAFE_API_KEY ?? "").trim();
   if (opts.requireKey && !apiKey) {
     throw new Error(
       "TYPESAFE_API_KEY is not set. Export it in your shell or add it to your harness env file.",
@@ -41,16 +60,18 @@ export function resolveEnvConfig(opts: ResolveEnvConfigOptions = {}): JevConfig 
   }
   const config: JevConfig = {
     apiKey,
-    baseUrl: ((process.env.TYPESAFE_BASE_URL ?? "").trim() || DEFAULT_BASE_URL).replace(/\/+$/, ""),
+    baseUrl: (
+      (overrides.baseUrl ?? env.TYPESAFE_BASE_URL ?? "").trim() || DEFAULT_BASE_URL
+    ).replace(/\/+$/, ""),
     model:
-      (opts.modelOverride ?? "").trim() ||
-      (process.env.TYPESAFE_DEFAULT_MODEL ?? "").trim() ||
+      (overrides.model ?? opts.modelOverride ?? "").trim() ||
+      (env.TYPESAFE_DEFAULT_MODEL ?? "").trim() ||
       DEFAULT_MODEL,
     // Adapters built on the kit send tool input and history as state; redaction
-    // is on unless JEV_REDACT=0.
-    redact: (process.env.JEV_REDACT ?? "").trim() !== "0",
+    // is on unless JEV_REDACT=0 or the caller passes its own decision.
+    redact: opts.redact ?? overrides.redact ?? (env.JEV_REDACT ?? "").trim() !== "0",
   };
-  const timeoutMs = parseTimeoutMs(process.env.JEV_TIMEOUT_MS);
+  const timeoutMs = overrides.timeoutMs ?? parseTimeoutMs(env.JEV_TIMEOUT_MS);
   if (timeoutMs !== undefined) config.timeoutMs = timeoutMs;
   return config;
 }

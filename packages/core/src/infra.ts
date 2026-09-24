@@ -9,6 +9,7 @@
  */
 import { askJev, validateQuestions } from "./client.js";
 import type { Answer, JevConfig, JevResponse, Question, Questions } from "./types.js";
+import { THRESHOLDS } from "./patterns.js";
 import type { SkillCandidate } from "./patterns.js";
 
 // ----------------------------- caching -----------------------------
@@ -175,6 +176,155 @@ export function jevBatch(config: JevConfig, state: unknown, signal?: AbortSignal
   };
 }
 
+// ----------------------------- map-reduce -----------------------------
+
+/** Max per-item digests fed into the reduce state. */
+const MAX_REDUCE_ITEMS = 200;
+/** Max chars of the reduce state; a huge corpus must not blow the request. */
+const MAX_REDUCE_CHARS = 4_000;
+/** Default in-flight item judgments. Jev bills per request, not per question. */
+const DEFAULT_MAP_CONCURRENCY = 4;
+
+export interface MapReduceOptions {
+  /**
+   * Optional final judgment over the collected per-item answers. The reduce
+   * state is a compact digest of those answers — never the corpus itself.
+   */
+  reduce?: {
+    instructions: string;
+    criteria: Record<string, string> | string[];
+    /** Defaults to `score` for an array of levels, `choice` for a keyed map. */
+    type?: "noul" | "choice" | "score";
+  };
+  /** Item judgments in flight at once. Default 4. */
+  concurrency?: number;
+  signal?: AbortSignal;
+}
+
+/** One line per answer — a verdict plus a confidence, never the source text. */
+function compactAnswer(answer: Answer | undefined): string {
+  if (!answer || typeof answer !== "object") return "missing";
+  if (answer.type === "noul") return `noul ${answer.noul.toFixed(2)}`;
+  if (answer.type === "choice")
+    return `choice ${answer.choice} (${(answer.confidence ?? 0).toFixed(2)})`;
+  if (answer.type === "score")
+    return `score ${answer.score} (${(answer.confidence ?? 0).toFixed(2)})`;
+  return "missing";
+}
+
+/**
+ * Build the reduce state: an index-aligned digest of the per-item answers,
+ * capped so a 10k-item corpus cannot blow the request. The corpus and the
+ * per-item questions never appear here — the reduce model sees verdicts, which
+ * is both cheaper and the only thing it needs to synthesize over.
+ */
+function buildReduceState(perItem: Array<Record<string, Answer>>): Record<string, unknown> {
+  const lines: string[] = [];
+  let chars = 0;
+  let omitted = 0;
+  for (let i = 0; i < perItem.length; i++) {
+    if (lines.length >= MAX_REDUCE_ITEMS) {
+      omitted = perItem.length - i;
+      break;
+    }
+    const answers = perItem[i] ?? {};
+    const ids = Object.keys(answers);
+    const digest =
+      ids.length === 0
+        ? "no answer"
+        : ids.map((id) => `${id}: ${compactAnswer(answers[id])}`).join("; ");
+    const line = `[${i}] ${digest}`;
+    if (chars + line.length > MAX_REDUCE_CHARS) {
+      omitted = perItem.length - i;
+      break;
+    }
+    lines.push(line);
+    chars += line.length + 1;
+  }
+  const state: Record<string, unknown> = {
+    item_count: perItem.length,
+    answers: lines,
+  };
+  if (omitted > 0) state.omitted_items = omitted;
+  return state;
+}
+
+/**
+ * Run the same questions over every item, then optionally reduce the answers.
+ *
+ * This is the dominant real-world Jev workload: "the same judgment over a huge
+ * corpus" (triage every file, score every doc, classify every log line). The
+ * map half is `buildQuestions` per item with bounded concurrency; the reduce
+ * half is ONE extra call whose state is the digest of the per-item answers, so
+ * the reduce cost stays flat as the corpus grows.
+ *
+ * `perItem` is index-aligned with `items`. Errors from any item reject the
+ * whole call — fail-open belongs at the caller, next to the decision it guards.
+ * An empty `items` short-circuits without spending a request.
+ */
+export async function withMapReduce<T>(
+  config: JevConfig,
+  items: readonly T[],
+  buildQuestions: (item: T, index: number) => Questions,
+  options: MapReduceOptions = {},
+): Promise<{ perItem: Array<Record<string, Answer>>; reduced: Answer | null }> {
+  if (items.length === 0) return { perItem: [], reduced: null };
+  const concurrency = Math.max(1, options.concurrency ?? DEFAULT_MAP_CONCURRENCY);
+
+  const perItem: Array<Record<string, Answer>> = new Array(items.length);
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      const response = await askJev(
+        config,
+        { item: items[index], index, total: items.length },
+        buildQuestions(items[index], index),
+        options.signal,
+      );
+      perItem[index] = response.answers ?? {};
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+
+  if (!options.reduce) return { perItem, reduced: null };
+
+  const { instructions, criteria, type } = options.reduce;
+  const resolvedType = type ?? (Array.isArray(criteria) ? "score" : "choice");
+  const question: Question =
+    resolvedType === "noul"
+      ? {
+          type: "noul",
+          instructions,
+          criteria: Array.isArray(criteria) ? criteria.join("; ") : criteria,
+        }
+      : resolvedType === "score"
+        ? {
+            type: "score",
+            instructions,
+            criteria: Array.isArray(criteria) ? criteria : Object.values(criteria),
+          }
+        : {
+            type: "choice",
+            instructions,
+            criteria: Array.isArray(criteria)
+              ? criteria.reduce<Record<string, string>>((acc, level, i) => {
+                  acc[`option_${i}`] = level;
+                  return acc;
+                }, {})
+              : criteria,
+          };
+
+  const response = await askJev(
+    config,
+    buildReduceState(perItem),
+    { reduced: question } as Questions,
+    options.signal,
+  );
+  return { perItem, reduced: response.answers?.reduced ?? null };
+}
+
 // ----------------------------- audit -----------------------------
 
 export interface AuditEntry {
@@ -282,6 +432,73 @@ export function withAudit(config: JevConfig, log: AuditLog): JevConfig {
   return { ...config, fetchImpl: wrapped };
 }
 
+// ----------------------------- refusals -----------------------------
+
+export interface RefusalEntry {
+  /** What was refused (a tool name, an action, a target path). */
+  key: string;
+  /** Why, as one fixed sentence per diagnosis. */
+  reason: string;
+  /** When this refusal was last recorded, in ms since epoch. */
+  at: number;
+  /** How many times this exact (key, reason) refusal has been recorded. */
+  count: number;
+}
+
+export interface RefusalLedger {
+  /** Record a refusal. Repeats of the same (key, reason) fold into one entry with an incrementing count. */
+  record(key: string, reason: string, at?: number): void;
+  entries(): readonly RefusalEntry[];
+}
+
+/** Distinct refusals retained before the oldest is dropped. */
+const DEFAULT_REFUSAL_MAX = 200;
+
+/**
+ * Ledger of refused actions, folded by exact `(key, reason)`.
+ *
+ * A refusal has to explain itself with ONE fixed sentence per diagnosis, and
+ * never the same sentence twice: the caller reading the ledger wants the
+ * distinct reasons, not 400 repetitions of "cannot resolve target". Repeats
+ * therefore coalesce into the original entry and only bump `count` — which
+ * keeps the signal (did this keep happening?) without the noise.
+ *
+ * Retention is capped at `max` distinct entries, newest kept; the oldest are
+ * dropped because a frequent schedule would otherwise bury its own real
+ * history under routine refusals. `at` is the most recent occurrence, so a
+ * folded entry still sorts as current.
+ */
+export function createRefusalLedger(
+  options: { now?: () => number; max?: number } = {},
+): RefusalLedger {
+  const now = options.now ?? Date.now;
+  const max = Math.max(1, options.max ?? DEFAULT_REFUSAL_MAX);
+  const entries: RefusalEntry[] = [];
+  const byKey = new Map<string, RefusalEntry>();
+
+  return {
+    record(key, reason, at) {
+      const when = at ?? now();
+      const folded = byKey.get(`${key}\u0000${reason}`);
+      if (folded) {
+        folded.count++;
+        folded.at = when;
+        return;
+      }
+      const entry: RefusalEntry = { key, reason, at: when, count: 1 };
+      byKey.set(`${key}\u0000${reason}`, entry);
+      entries.push(entry);
+      while (entries.length > max) {
+        const dropped = entries.shift();
+        if (dropped) byKey.delete(`${dropped.key}\u0000${dropped.reason}`);
+      }
+    },
+    entries() {
+      return entries.map((e) => Object.freeze({ ...e }));
+    },
+  };
+}
+
 // ----------------------------- local fallback -----------------------------
 
 const TOKEN_RE = /[a-z0-9]+/g;
@@ -318,6 +535,7 @@ export function localRouteSkill(
     const sc = overlap(m, desc);
     if (!best || sc > best.score) best = { name: s.name, score: sc };
   }
-  if (!best || best.score < 0.05) return { skill: null, score: best?.score ?? 0 };
+  if (!best || best.score < THRESHOLDS.localRouterFloor)
+    return { skill: null, score: best?.score ?? 0 };
   return { skill: best.name, score: best.score };
 }

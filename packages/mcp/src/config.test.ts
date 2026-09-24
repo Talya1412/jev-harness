@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BASE_URL, DEFAULT_MODEL } from "@jev-harness/core";
-import { parseTimeoutMs, resolveJevConfig } from "../src/config.js";
+import { parseTimeoutMs } from "@jev-harness/kit";
+import { resolveJevConfig } from "../src/config.js";
 
 describe("parseTimeoutMs", () => {
   it("returns undefined for absent, blank, non-numeric, and non-positive input", () => {
@@ -22,11 +23,19 @@ describe("resolveJevConfig", () => {
     expect(() => resolveJevConfig({}, { TYPESAFE_API_KEY: "  " })).toThrow(
       /TYPESAFE_API_KEY is not set/,
     );
+    // The kit's generic message would leave a client-configured server guessing;
+    // the MCP wrapper names where this key actually belongs.
+    expect(() => resolveJevConfig({}, {})).toThrow(/MCP client config/);
   });
 
   it("defaults base URL and model, and omits an unset timeout", () => {
     const cfg = resolveJevConfig({}, { TYPESAFE_API_KEY: "k" });
-    expect(cfg).toEqual({ apiKey: "k", baseUrl: DEFAULT_BASE_URL, model: DEFAULT_MODEL });
+    expect(cfg).toEqual({
+      apiKey: "k",
+      baseUrl: DEFAULT_BASE_URL,
+      model: DEFAULT_MODEL,
+      redact: false,
+    });
     expect(cfg).not.toHaveProperty("timeoutMs");
   });
 
@@ -40,7 +49,13 @@ describe("resolveJevConfig", () => {
         JEV_TIMEOUT_MS: "900",
       },
     );
-    expect(cfg).toEqual({ apiKey: "k", baseUrl: "https://x.test", model: "m", timeoutMs: 900 });
+    expect(cfg).toEqual({
+      apiKey: "k",
+      baseUrl: "https://x.test",
+      model: "m",
+      timeoutMs: 900,
+      redact: false,
+    });
   });
 
   it("lets an explicit override win over the environment", () => {
@@ -55,5 +70,18 @@ describe("resolveJevConfig", () => {
 
   it("trims a padded key rather than sending whitespace", () => {
     expect(resolveJevConfig({}, { TYPESAFE_API_KEY: "  k  " }).apiKey).toBe("k");
+  });
+
+  it("sends tool state unredacted even when JEV_REDACT asks for redaction", () => {
+    const saved = process.env.JEV_REDACT;
+    process.env.JEV_REDACT = "1";
+    try {
+      // A tool's state is what the caller deliberately submitted; the MCP
+      // surface documents full fidelity, so the env knob must not override it.
+      expect(resolveJevConfig({}, { TYPESAFE_API_KEY: "k" }).redact).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.JEV_REDACT;
+      else process.env.JEV_REDACT = saved;
+    }
   });
 });

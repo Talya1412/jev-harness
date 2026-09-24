@@ -82,3 +82,49 @@ describe("fail-open hook paths", () => {
     }
   });
 });
+
+describe("input hook skill shortlist", () => {
+  it("keeps a lexically matching tool that roster order alone would hide", async () => {
+    const saved = process.env.TYPESAFE_API_KEY;
+    process.env.TYPESAFE_API_KEY = "k";
+    const bodies: any[] = [];
+    const fetchSpy = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({
+          model: body.model,
+          answers: { best: { type: "choice", choice: "zzz-special", confidence: 0.9 } },
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const notifications: string[] = [];
+    const { api, handlers } = fakeApi();
+    // 20 filler tools + one real match: core slices to the first 12 candidates,
+    // so without a lexical prefilter "zzz-special" would never reach Jev.
+    const roster = Array.from({ length: 20 }, (_, i) => ({
+      name: "alpha-" + i,
+      description: "filler",
+    }));
+    roster.push({ name: "zzz-special", description: "the one that matters" });
+    (api as any).getAllTools = vi.fn(() => roster);
+    jevPi(api);
+    try {
+      const hook = handlers.get("input")!;
+      hook({ text: "please run the zzz special workflow" }, {
+        ui: { notify: (m: string) => notifications.push(m) },
+      } as any);
+      await vi.waitFor(() => expect(bodies).toHaveLength(1));
+      const criteria = Object.keys(bodies[0].questions.best.criteria);
+      expect(criteria).toContain("zzz-special");
+      expect(criteria).not.toContain("alpha-0");
+      await vi.waitFor(() => expect(notifications).toHaveLength(1));
+      expect(notifications[0]).toContain("zzz-special");
+    } finally {
+      if (saved === undefined) delete process.env.TYPESAFE_API_KEY;
+      else process.env.TYPESAFE_API_KEY = saved;
+    }
+  });
+});

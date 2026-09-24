@@ -6,7 +6,6 @@ import {
   blockText,
   collectToolPairs,
   keepThreshold,
-  resolveJevConfig,
   truncate,
 } from "../src/compact.js";
 
@@ -25,32 +24,6 @@ function result(id: string, text = "output") {
     message: { role: "toolResult", toolCallId: id, content: [{ type: "text", text }] },
   };
 }
-
-describe("resolveJevConfig", () => {
-  it("carries only the values that are actually set", () => {
-    expect(resolveJevConfig({ TYPESAFE_API_KEY: "k" })).toEqual({ apiKey: "k" });
-  });
-
-  it("applies base URL, model, and a positive timeout", () => {
-    expect(
-      resolveJevConfig({
-        TYPESAFE_API_KEY: "k",
-        TYPESAFE_BASE_URL: "https://x.test",
-        TYPESAFE_DEFAULT_MODEL: "m",
-        JEV_TIMEOUT_MS: "2500",
-      }),
-    ).toEqual({ apiKey: "k", baseUrl: "https://x.test", model: "m", timeoutMs: 2500 });
-  });
-
-  it("ignores a non-positive or unparseable timeout", () => {
-    expect(
-      resolveJevConfig({ TYPESAFE_API_KEY: "k", JEV_TIMEOUT_MS: "0" }).timeoutMs,
-    ).toBeUndefined();
-    expect(
-      resolveJevConfig({ TYPESAFE_API_KEY: "k", JEV_TIMEOUT_MS: "soon" }).timeoutMs,
-    ).toBeUndefined();
-  });
-});
 
 describe("keepThreshold", () => {
   it("accepts a probability and falls back outside 0..1", () => {

@@ -1,8 +1,8 @@
 // Bundled by @jev-harness/omp — @jev-harness/core is inlined. Do not edit.
 
 // dist/extension.js
-import { homedir } from "node:os";
-import { join as join2 } from "node:path";
+import { homedir as homedir2 } from "node:os";
+import { join as join3 } from "node:path";
 
 // ../core/dist/types.js
 var DEFAULT_BASE_URL = "https://api.typesafe.ai";
@@ -250,71 +250,6 @@ async function askJev(config, state, questions, signal) {
   }
   throw lastError ?? new JevError("Jev call failed", { retryable: false });
 }
-async function listJevModels(config, signal) {
-  const cfg = resolveConfig(config);
-  let lastError = null;
-  for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
-    if (signal?.aborted) {
-      const abortErr = new Error("Jev models call aborted");
-      abortErr.name = "AbortError";
-      throw abortErr;
-    }
-    const controller = new AbortController();
-    const onAbort = () => controller.abort();
-    signal?.addEventListener("abort", onAbort, { once: true });
-    const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
-    try {
-      const res = await cfg.fetchImpl(cfg.baseUrl + "/v1/models", {
-        headers: { Authorization: "Bearer " + cfg.apiKey },
-        signal: controller.signal
-      });
-      if (res.status === 429 || res.status >= 500) {
-        const text = await res.text().catch(() => "");
-        lastError = new JevError(`Jev models HTTP ${res.status}: ${text.slice(0, 300)}`, {
-          status: res.status,
-          retryable: true
-        });
-        if (attempt < cfg.maxAttempts) {
-          cfg.onRetry?.(attempt, lastError);
-          await sleep(250 * attempt * attempt);
-          continue;
-        }
-        throw lastError;
-      }
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new JevError(`Jev models HTTP ${res.status}: ${text.slice(0, 500)}`, {
-          status: res.status,
-          retryable: false
-        });
-      }
-      let body;
-      try {
-        body = await res.json();
-      } catch {
-        throw new JevError("Jev models returned malformed JSON", { retryable: false });
-      }
-      const models = body?.models;
-      if (!Array.isArray(models))
-        throw new JevError("Jev models response is missing `models`", { retryable: false });
-      return models;
-    } catch (err) {
-      const e = err instanceof Error ? err : new Error(String(err));
-      if (e instanceof JevError && !e.retryable)
-        throw e;
-      lastError = e;
-      const transient = e.name === "AbortError" || /fetch failed|ECONN|network|timeout|aborted/i.test(e.message);
-      if (!transient || attempt === cfg.maxAttempts)
-        throw e;
-      cfg.onRetry?.(attempt, e);
-      await sleep(250 * attempt * attempt);
-    } finally {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-    }
-  }
-  throw lastError ?? new JevError("Jev models call failed", { retryable: false });
-}
 function noul(response, id) {
   const a = response.answers[id];
   if (!a || a.type !== "noul" || typeof a.noul !== "number") {
@@ -334,17 +269,74 @@ function choice(response, id) {
 var MAX_BROWSER_ELEMENTS = 30;
 var MAX_ELEMENT_CHARS = 500;
 var MAX_PAGE_TEXT_CHARS = 8e3;
+var THRESHOLDS = Object.freeze({
+  /**
+   * Destructive tool_call gate. Measured on `golden/destructive-gate-dual.json`
+   * (104 cases, live recording 2026-09-24): AUC 1.000, Brier 0.0165, and a
+   * noiseless plateau of [0.40, 0.56] — the noisiest negative at 0.40 and the
+   * quietest positive at 0.56. 0.5 sits inside it with margin on both sides.
+   * Raising this to 0.6 would cost one false negative, so 0.5 is the value to
+   * keep. Re-measure with:
+   * `node packages/eval/scripts/record-baseline.mjs packages/eval/golden/destructive-gate-dual.json destructive packages/eval/golden/destructive-gate-dual.baseline.json`
+   */
+  destructiveGate: 0.5,
+  /** Minimum confidence before a skill suggestion is worth injecting. */
+  skillRouting: 0.5,
+  gateInjection: 0.7,
+  detectPromptInjection: 0.6,
+  /** Dedup / same-underlying-fact cutoff. */
+  duplicate: 0.5,
+  /**
+   * Minimum confidence in the dual gate's category choice. Below this the
+   * category is treated as unproven and the verdict becomes `confirm` rather
+   * than a hard block, so a genuine-but-uncertain case always has a way
+   * forward.
+   */
+  categoryConfidence: 0.5,
+  // --- the remaining public defaults, same values every pattern already used ---
+  /** Post-hoc verification that a finished step actually satisfied the task. */
+  verifyStep: 0.6,
+  /** Genuine ambiguity fork worth one clarifying question. */
+  clarification: 0.5,
+  /** Cheap-vs-expensive model routing for a task. */
+  effortRouting: 0.5,
+  /** Browser-action selection confidence floor. */
+  browserAction: 0.4,
+  /** Tool selection confidence floor. */
+  toolPick: 0.4,
+  /** Tool side-effect risk floor that demands explicit confirmation. */
+  toolRisk: 0.5,
+  /** RAG claim-support floor before a generated statement is trusted. */
+  claimSupport: 0.5,
+  /** Context-sufficiency floor before asking the user for more. */
+  contextSufficiency: 0.5,
+  /** Regression-detection floor. */
+  regression: 0.5,
+  /** Subagent selection confidence floor. */
+  subagentPick: 0.4,
+  /** Subagent delegation floor. */
+  delegation: 0.5,
+  /** Commit-safety floor for `commitGate`. */
+  commitSafe: 0.8,
+  /** Secret-leak flag floor. */
+  secretLeak: 0.6,
+  /**
+   * Token-overlap floor for `infra.localRouteSkill`. Not a Jev probability —
+   * it is a different scale, so it is tuned separately from the rest.
+   */
+  localRouterFloor: 0.05
+});
 async function routeSkill(config, message, skills, options = {}) {
-  const minConfidence = options.minConfidence ?? 0.5;
-  const shortlist = skills.slice(0, options.maxCandidates ?? 12);
-  if (shortlist.length === 0)
+  const minConfidence = options.minConfidence ?? THRESHOLDS.skillRouting;
+  const shortlist2 = skills.slice(0, options.maxCandidates ?? 12);
+  if (shortlist2.length === 0)
     return { skill: null, confidence: 0, probabilities: {} };
-  if (shortlist.some((s) => s.name === "none")) {
+  if (shortlist2.some((s) => s.name === "none")) {
     throw new JevError('routeSkill: "none" is reserved for the abstain option; rename the skill candidate', { retryable: false });
   }
   const criteria = { none: "No listed skill is relevant to this request" };
   const state = {};
-  for (const s of shortlist) {
+  for (const s of shortlist2) {
     const desc = (s.description ?? "").replace(/\s+/g, " ").slice(0, 180);
     criteria[s.name] = desc ? `${s.name}: ${desc}` : `Skill named ${s.name}`;
     state[s.name] = desc;
@@ -360,8 +352,14 @@ async function routeSkill(config, message, skills, options = {}) {
   const picked = result.choice && result.choice !== "none" && result.confidence >= minConfidence ? result.choice : null;
   return { skill: picked, confidence: result.confidence, probabilities: result.probabilities };
 }
-async function judgeDestructive(config, call, options = {}) {
-  const threshold = options.threshold ?? 0.5;
+var DESTRUCTIVE_CATEGORIES = [
+  "destructive",
+  "reversible-mutation",
+  "read-only",
+  "unknown"
+];
+async function judgeDestructiveDual(config, call, options) {
+  const threshold = options?.threshold ?? THRESHOLDS.destructiveGate;
   const response = await askJev(config, {
     tool: call.tool,
     input: JSON.stringify(call.input ?? {}).slice(0, 4e3),
@@ -370,13 +368,46 @@ async function judgeDestructive(config, call, options = {}) {
     destructive: {
       type: "noul",
       instructions: "Running this exact tool call would destroy or irreversibly change data, history, or system state. That includes: recursive or bulk deletion; overwriting or truncating existing files without backup; git history rewrite, force-push, or discarding uncommitted work; dropping tables or deleting namespaces/volumes; formatting, wiping, or overwriting a disk or device; changing permissions or ownership across a broad path; exhausting, killing, or shutting down the machine (fork bombs, mass process kill, shutdown/reboot); publishing a package or spending money; or sending secrets to an external endpoint. Reading, searching, listing, creating a brand-new file, building, running tests, or editing a file in place with a normal edit tool is NOT destructive."
+    },
+    category: {
+      type: "choice",
+      instructions: "What would this tool call actually do? Judge the call itself, not the tool's general reputation.",
+      criteria: {
+        destructive: "Deletes or overwrites existing data, rewrites or force-pushes history, spends money, or publishes irreversibly.",
+        "reversible-mutation": "Changes state that can be restored \u2014 a normal file edit, an append, a committed change on a branch.",
+        "read-only": "Only reads, lists, searches, builds, or tests; nothing on disk or remote changes.",
+        unknown: "Cannot tell from the call alone."
+      }
     }
-  }, options.signal);
-  const p = noul(response, "destructive");
-  return { destructive: p, blocked: p >= threshold };
+  }, options?.signal);
+  const readDestructive = () => {
+    try {
+      return noul(response, "destructive");
+    } catch {
+      return 0;
+    }
+  };
+  const readCategory = () => {
+    try {
+      const picked = choice(response, "category");
+      const label = String(picked.choice ?? "").trim().toLowerCase();
+      return {
+        category: DESTRUCTIVE_CATEGORIES.includes(label) ? label : "unknown",
+        confidence: picked.confidence ?? 0
+      };
+    } catch {
+      return { category: "unknown", confidence: 0 };
+    }
+  };
+  const destructive = readDestructive();
+  const { category, confidence } = readCategory();
+  if (!(destructive >= threshold))
+    return { destructive, category, confidence, decision: "allow" };
+  const proven = category === "destructive" && confidence >= THRESHOLDS.categoryConfidence;
+  return { destructive, category, confidence, decision: proven ? "block" : "confirm" };
 }
 async function chooseBrowserAction(config, input, options = {}) {
-  const minConfidence = options.minConfidence ?? 0.4;
+  const minConfidence = options.minConfidence ?? THRESHOLDS.browserAction;
   const selected = input.elements.slice(0, MAX_BROWSER_ELEMENTS);
   let truncated = input.elements.length > selected.length;
   const capField = (s) => {
@@ -460,8 +491,8 @@ GOAL: ${input.goal.slice(0, 1e3)}`,
   return { operation: op.choice ?? null, target, confidence: op.confidence, act, truncated };
 }
 async function pickTool(config, input, options = {}) {
-  const minConfidence = options.minConfidence ?? 0.4;
-  const riskThreshold = options.riskThreshold ?? 0.5;
+  const minConfidence = options.minConfidence ?? THRESHOLDS.toolPick;
+  const riskThreshold = options.riskThreshold ?? THRESHOLDS.toolRisk;
   if (input.tools.length === 0)
     return { tool: null, confidence: 0, risky: 0, confirmRequired: false, act: false };
   if (input.tools.some((t) => t.name === "none")) {
@@ -494,6 +525,37 @@ async function pickTool(config, input, options = {}) {
     risky,
     confirmRequired: risky >= riskThreshold,
     act
+  };
+}
+
+// ../core/dist/infra.js
+var DEFAULT_REFUSAL_MAX = 200;
+function createRefusalLedger(options = {}) {
+  const now = options.now ?? Date.now;
+  const max = Math.max(1, options.max ?? DEFAULT_REFUSAL_MAX);
+  const entries = [];
+  const byKey = /* @__PURE__ */ new Map();
+  return {
+    record(key, reason, at) {
+      const when = at ?? now();
+      const folded = byKey.get(`${key}\0${reason}`);
+      if (folded) {
+        folded.count++;
+        folded.at = when;
+        return;
+      }
+      const entry = { key, reason, at: when, count: 1 };
+      byKey.set(`${key}\0${reason}`, entry);
+      entries.push(entry);
+      while (entries.length > max) {
+        const dropped = entries.shift();
+        if (dropped)
+          byKey.delete(`${dropped.key}\0${dropped.reason}`);
+      }
+    },
+    entries() {
+      return entries.map((e) => Object.freeze({ ...e }));
+    }
   };
 }
 
@@ -788,24 +850,254 @@ function withPersistentCache(config, cache) {
   return { ...config, fetchImpl: wrapped };
 }
 
-// dist/config.js
-var DEFAULT_TIMEOUT_MS2 = 15e3;
-var GATE_THRESHOLD = 0.5;
-var SKILL_MIN_CONFIDENCE = 0.5;
-function readConfig(env, modelOverride, redact) {
-  const apiKey = (env.TYPESAFE_API_KEY ?? "").trim();
-  if (!apiKey) {
+// ../core/dist/taxonomy.js
+var DEFAULT_RATE_LIMIT_BACKOFF_MS = 3e4;
+var MAX_RATE_LIMIT_BACKOFF_MS = 3e5;
+var freeze = (p) => Object.freeze(p);
+var POLICIES = Object.freeze({
+  /** The key is missing, rejected, or lacks access: every later call fails too. */
+  auth: freeze({
+    kind: "auth",
+    retryable: false,
+    backoffMs: 0,
+    disableSession: true,
+    silent: false
+  }),
+  /** The model name is withdrawn or unavailable to this key: retrying re-fails. */
+  model: freeze({
+    kind: "model",
+    retryable: false,
+    backoffMs: 0,
+    disableSession: true,
+    silent: false
+  }),
+  /** Throttled. Retryable, but only after the advertised window. */
+  rate_limit: freeze({
+    kind: "rate_limit",
+    retryable: true,
+    backoffMs: DEFAULT_RATE_LIMIT_BACKOFF_MS,
+    disableSession: false,
+    silent: false
+  }),
+  /** DNS/TLS/socket/abort failures. Retryable and deliberately quiet. */
+  network: freeze({
+    kind: "network",
+    retryable: true,
+    backoffMs: 1e3,
+    disableSession: false,
+    silent: true
+  }),
+  /** Upstream 5xx. Retryable, worth logging. */
+  server: freeze({
+    kind: "server",
+    retryable: true,
+    backoffMs: 2e3,
+    disableSession: false,
+    silent: false
+  }),
+  /** Anything unrecognised: do not retry, do not disable, do not hide it. */
+  unknown: freeze({
+    kind: "unknown",
+    retryable: false,
+    backoffMs: 0,
+    disableSession: false,
+    silent: false
+  })
+});
+var MODEL_MENTION_RE = /\bmodel\b/i;
+var MODEL_MESSAGE_RE = /unknown model|no such model|invalid model|unsupported model|model[^.]{0,40}(?:not found|not supported|unavailable|does not exist)/i;
+var NETWORK_MESSAGE_RE = /fetch failed|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ETIMEDOUT|EPIPE|socket hang up|network|timed? ?out|abort/i;
+function readMessage(error) {
+  if (error instanceof Error)
+    return error.message;
+  if (typeof error === "string")
+    return error;
+  if (error && typeof error === "object") {
+    const m = error.message;
+    if (typeof m === "string")
+      return m;
+  }
+  return "";
+}
+function readName(error) {
+  if (error instanceof Error)
+    return error.name;
+  if (error && typeof error === "object") {
+    const n = error.name;
+    if (typeof n === "string")
+      return n;
+  }
+  return "";
+}
+function readStatus(error) {
+  if (error instanceof JevError)
+    return error.status;
+  if (!error || typeof error !== "object")
+    return void 0;
+  const direct = error.status;
+  if (typeof direct === "number")
+    return direct;
+  const nested = error.response?.status;
+  return typeof nested === "number" ? nested : void 0;
+}
+function readHeader(error, name) {
+  if (!error || typeof error !== "object")
+    return void 0;
+  const nested = error.headers;
+  const container = nested ?? error;
+  if (!container || typeof container !== "object")
+    return void 0;
+  const get = container.get;
+  if (typeof get === "function") {
+    const value = container.get(name);
+    return value === null || value === void 0 ? void 0 : String(value);
+  }
+  if (container instanceof Map) {
+    const found = container.get(name);
+    return found === void 0 || found === null ? void 0 : String(found);
+  }
+  const wanted = name.toLowerCase();
+  for (const [k, v] of Object.entries(container)) {
+    if (k.toLowerCase() === wanted && v !== void 0 && v !== null)
+      return String(v);
+  }
+  return void 0;
+}
+var clampBackoff = (ms) => Math.min(Math.max(0, ms), MAX_RATE_LIMIT_BACKOFF_MS);
+function retryAfterMs(error) {
+  const raw = readHeader(error, "retry-after");
+  if (raw === void 0)
+    return void 0;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0)
+    return void 0;
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isFinite(seconds) ? clampBackoff(seconds * 1e3) : void 0;
+  }
+  const at = Date.parse(trimmed);
+  return Number.isNaN(at) ? void 0 : clampBackoff(at - Date.now());
+}
+function classifyJevFailure(error) {
+  const status = readStatus(error);
+  const message = readMessage(error);
+  if (status !== void 0) {
+    if (status === 401 || status === 403)
+      return "auth";
+    if (status === 404 && MODEL_MENTION_RE.test(message))
+      return "model";
+    if (status === 429)
+      return "rate_limit";
+    if (status >= 500)
+      return "server";
+    return "unknown";
+  }
+  if (MODEL_MESSAGE_RE.test(message))
+    return "model";
+  if (error instanceof TypeError || readName(error) === "AbortError")
+    return "network";
+  if (NETWORK_MESSAGE_RE.test(message))
+    return "network";
+  return "unknown";
+}
+function policyForFailure(kind, error) {
+  const base = POLICIES[kind] ?? POLICIES.unknown;
+  if (error instanceof JevError && error.retryable === false && base.retryable) {
+    return freeze({ ...base, retryable: false, backoffMs: 0 });
+  }
+  if (base.kind === "rate_limit" && base.retryable) {
+    const honoured = retryAfterMs(error);
+    if (honoured !== void 0 && honoured !== base.backoffMs) {
+      return freeze({ ...base, backoffMs: honoured });
+    }
+  }
+  return base;
+}
+
+// ../kit/dist/config.js
+var MAX_TIMEOUT_MS = 2147483647;
+function parseTimeoutMs(raw) {
+  if (raw === void 0 || raw.trim() === "")
+    return void 0;
+  const n = Number(raw.trim());
+  if (!Number.isFinite(n) || n <= 0)
+    return void 0;
+  return Math.min(Math.floor(n), MAX_TIMEOUT_MS);
+}
+function resolveEnvConfig(opts = {}) {
+  const env = opts.env ?? process.env;
+  const overrides = opts.overrides ?? {};
+  const apiKey = (overrides.apiKey ?? env.TYPESAFE_API_KEY ?? "").trim();
+  if (opts.requireKey && !apiKey) {
     throw new Error("TYPESAFE_API_KEY is not set. Export it in your shell or add it to your harness env file.");
   }
-  const timeoutRaw = (env.JEV_TIMEOUT_MS ?? "").trim();
-  const timeoutMs = timeoutRaw !== "" && Number.isFinite(Number(timeoutRaw)) ? Number(timeoutRaw) : DEFAULT_TIMEOUT_MS2;
-  return {
+  const config = {
     apiKey,
-    baseUrl: (env.TYPESAFE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ""),
-    model: (modelOverride ?? "").trim() || env.TYPESAFE_DEFAULT_MODEL || DEFAULT_MODEL,
-    timeoutMs,
-    redact
+    baseUrl: ((overrides.baseUrl ?? env.TYPESAFE_BASE_URL ?? "").trim() || DEFAULT_BASE_URL).replace(/\/+$/, ""),
+    model: (overrides.model ?? opts.modelOverride ?? "").trim() || (env.TYPESAFE_DEFAULT_MODEL ?? "").trim() || DEFAULT_MODEL,
+    // Adapters built on the kit send tool input and history as state; redaction
+    // is on unless JEV_REDACT=0 or the caller passes its own decision.
+    redact: opts.redact ?? overrides.redact ?? (env.JEV_REDACT ?? "").trim() !== "0"
   };
+  const timeoutMs = overrides.timeoutMs ?? parseTimeoutMs(env.JEV_TIMEOUT_MS);
+  if (timeoutMs !== void 0)
+    config.timeoutMs = timeoutMs;
+  return config;
+}
+
+// ../kit/dist/router.js
+function lexicalShortlist(text, roster, opts = {}) {
+  const limit = Math.max(1, opts.limit ?? 12);
+  const lower = text.toLowerCase();
+  const scored = roster.filter((s) => s.name !== "").map((s) => {
+    const parts = s.name.toLowerCase().split(/[-_]/);
+    let score = 0;
+    for (const part of parts) {
+      if (part.length > 3 && lower.includes(part))
+        score += 2;
+      if (part.length <= 4 && lower.includes(part))
+        score += 1;
+    }
+    return { name: s.name, score };
+  });
+  const lexical = scored.filter((x) => x.score > 0).map((x) => x.name);
+  return (lexical.length > 0 ? lexical : roster.map((s) => s.name).filter((n) => n !== "")).slice(0, limit);
+}
+
+// dist/config.js
+var DEFAULT_TIMEOUT_MS2 = 15e3;
+var GATE_THRESHOLD = THRESHOLDS.destructiveGate;
+var SKILL_MIN_CONFIDENCE = THRESHOLDS.skillRouting;
+var GATE_DEADLINE_MS = 8e3;
+function withDeadline(host, ms) {
+  const timer = AbortSignal.timeout(ms);
+  if (!host)
+    return timer;
+  if (typeof AbortSignal.any === "function")
+    return AbortSignal.any([host, timer]);
+  const ctl = new AbortController();
+  const abort = () => ctl.abort();
+  if (host.aborted)
+    abort();
+  else
+    host.addEventListener("abort", abort, { once: true });
+  timer.addEventListener("abort", abort, { once: true });
+  return ctl.signal;
+}
+function readConfig(env, modelOverride, redact) {
+  const cfg = resolveEnvConfig({
+    env,
+    modelOverride,
+    requireKey: true,
+    // parseTimeoutMs also caps at MAX_TIMEOUT_MS, which the previous inline
+    // Number() did not: a huge value would overflow setTimeout into ~1ms.
+    overrides: { timeoutMs: parseTimeoutMs(env.JEV_TIMEOUT_MS) ?? DEFAULT_TIMEOUT_MS2 }
+  });
+  if (redact === void 0)
+    delete cfg.redact;
+  else
+    cfg.redact = redact;
+  return cfg;
 }
 function redactOn(env, context) {
   const raw = (env.OMP_JEV_REDACT ?? "").trim();
@@ -834,13 +1126,25 @@ var COMPACT_DEFAULTS = {
   truncateHeadChars: 300,
   minReductionRatio: 0.25
 };
+function contentText(content) {
+  if (typeof content === "string")
+    return content;
+  if (Array.isArray(content)) {
+    return content.map((x) => typeof x === "string" ? x : typeof x?.text === "string" ? x.text : "").filter((s) => s !== "").join("\n");
+  }
+  if (content == null)
+    return "";
+  return JSON.stringify(content);
+}
 function flatten(messages) {
   const out = [];
   for (const raw of messages) {
-    const m = raw;
+    const m = raw ?? {};
     const role = String(m.role ?? "unknown");
     const blocks = Array.isArray(m.content) ? m.content : [];
     const texts = [];
+    if (typeof m.content === "string" && m.content !== "")
+      texts.push(m.content);
     const toolUses = [];
     const toolResults = [];
     for (const b of blocks) {
@@ -851,22 +1155,27 @@ function flatten(messages) {
       }
       if (b.type === "text" && typeof b.text === "string")
         texts.push(b.text);
-      else if (b.type === "tool_use" || b.type === "tool_call") {
+      else if (b.type === "tool_use" || b.type === "tool_call" || b.type === "toolCall") {
         toolUses.push({
           id: String(b.id ?? b.toolCallId ?? ""),
           tool: String(b.name ?? b.toolName ?? "tool"),
-          input: b.input ?? b.args ?? {}
+          input: b.input ?? b.arguments ?? b.args ?? {}
         });
-      } else if (b.type === "tool_result") {
-        const c = b.content;
-        let tr = "";
-        if (typeof c === "string")
-          tr = c;
-        else if (Array.isArray(c))
-          tr = c.map((x) => typeof x === "string" ? x : x?.text ?? "").join("\n");
-        else if (c != null)
-          tr = JSON.stringify(c);
-        toolResults.push({ id: String(b.tool_use_id ?? b.toolUseId ?? ""), text: tr });
+      } else if (b.type === "tool_result" || b.type === "toolResult") {
+        toolResults.push({
+          id: String(b.tool_use_id ?? b.toolUseId ?? b.toolCallId ?? ""),
+          text: contentText(b.content)
+        });
+      }
+    }
+    if (role === "toolResult") {
+      const id = String(m.toolCallId ?? "");
+      if (id !== "") {
+        toolResults.push({
+          id,
+          text: blocks.length > 0 ? contentText(m.content) : texts.join("\n")
+        });
+        texts.length = 0;
       }
     }
     out.push({ role, text: texts.join("\n"), toolUses, toolResults });
@@ -991,29 +1300,30 @@ async function planCompaction(prep) {
     return { kind: "defer", reason: "insufficient-reduction", detail: { savedChars, totalChars } };
   }
   const truncById = new Map(dropped.map((d) => [d.call.id, d.call]));
+  const renderResult = (id, fallback) => {
+    const t = truncById.get(id);
+    if (!t)
+      return "[tool_result id=" + id + "] " + fallback;
+    const head = prep.effective.truncateHeadChars;
+    const body = t.resultText ?? fallback;
+    const omitted = Math.max(0, body.length - head);
+    return "[tool_result id=" + id + "] " + body.slice(0, head) + (omitted > 0 ? "\n[..." + omitted + " chars omitted by jev_compact; re-run the tool to recover]" : "");
+  };
+  const carried = /* @__PURE__ */ new Set();
+  for (const m of flat)
+    for (const r of m.toolResults)
+      carried.add(r.id);
   const render = (msgs) => msgs.map((m) => {
     const parts = [];
-    if (m.text)
-      parts.push(m.text);
+    for (const r of m.toolResults)
+      parts.push(renderResult(r.id, r.text));
     for (const u of m.toolUses) {
-      const t = truncById.get(u.id);
       parts.push("[tool_use id=" + u.id + " name=" + u.tool + " input=" + JSON.stringify(u.input) + "]");
-      if (t && t.resultText != null) {
-        const full = t.resultText;
-        parts.push("[tool_result id=" + u.id + "] " + full.slice(0, prep.effective.truncateHeadChars) + "\n[..." + (t.resultChars - prep.effective.truncateHeadChars) + " chars omitted by jev_compact; re-run the tool to recover]");
-      }
+      if (!carried.has(u.id) && truncById.has(u.id))
+        parts.push(renderResult(u.id, ""));
     }
-    for (const r of m.toolResults) {
-      if (m.toolUses.some((w) => w.id === r.id))
-        continue;
-      const t = truncById.get(r.id);
-      if (t && t.resultText != null) {
-        const full = t.resultText;
-        parts.push("[tool_result id=" + r.id + "] " + full.slice(0, prep.effective.truncateHeadChars) + "\n[..." + (t.resultChars - prep.effective.truncateHeadChars) + " chars omitted by jev_compact]");
-      } else {
-        parts.push("[tool_result id=" + r.id + "] " + r.text);
-      }
-    }
+    if (m.text)
+      parts.unshift(m.text);
     return parts.filter(Boolean).join("\n");
   }).filter(Boolean).join("\n\n");
   const summary = "Verbatim history retained; " + dropped.length + " tool output(s) truncated by Jev decisions.\n\n" + render(flat);
@@ -1034,13 +1344,235 @@ function jevAsker(cfg) {
   };
 }
 
+// dist/failure.js
+import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync3 } from "node:fs";
+import { dirname as dirname3 } from "node:path";
+function createTracedLedger(path, max = 200) {
+  const ledger = createRefusalLedger({ max });
+  const sink = (path ?? "").trim();
+  const seen = /* @__PURE__ */ new Set();
+  return {
+    record(key, reason, at) {
+      ledger.record(key, reason, at);
+      if (sink === "")
+        return;
+      const id = key + "\0" + reason;
+      if (seen.has(id))
+        return;
+      seen.add(id);
+      try {
+        mkdirSync3(dirname3(sink), { recursive: true });
+        appendFileSync2(sink, JSON.stringify({
+          ts: new Date(at ?? Date.now()).toISOString(),
+          kind: "omp_refusal",
+          key,
+          reason
+        }) + "\n", "utf8");
+      } catch {
+      }
+    },
+    entries() {
+      return ledger.entries();
+    }
+  };
+}
+function decideOnFailure(error, where) {
+  const kind = classifyJevFailure(error);
+  const policy = policyForFailure(kind, error);
+  return {
+    kind,
+    disableSession: policy.disableSession,
+    silent: policy.silent,
+    backoffMs: policy.retryable ? policy.backoffMs : 0,
+    message: "jev " + where + ": " + kind + " failure" + (policy.disableSession ? " \u2014 disabling Jev for this session" : "") + ": " + describe(error)
+  };
+}
+function describe(error) {
+  if (error instanceof Error)
+    return (error.message || error.name).slice(0, 300);
+  if (typeof error === "string")
+    return error.slice(0, 300);
+  try {
+    return JSON.stringify(error).slice(0, 300);
+  } catch {
+    return String(error).slice(0, 300);
+  }
+}
+function reportFailure(logger, decision) {
+  try {
+    if (decision.silent)
+      logger.debug(decision.message);
+    else
+      logger.warn(decision.message);
+  } catch {
+  }
+  return { disabled: decision.disableSession };
+}
+
+// dist/router.js
+import { existsSync as existsSync2, readFileSync as readFileSync2, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join as join2 } from "node:path";
+var MAX_CANDIDATES = 12;
+var MIN_PROMPT_CHARS = 12;
+var ROUTE_DEBOUNCE_MS = 250;
+var ROUTE_CACHE_TTL_MS = 10 * 60 * 1e3;
+function parseSkillFrontmatter(text) {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!match)
+    return null;
+  const out = {};
+  let key = null;
+  for (const raw of match[1].split(/\r?\n/)) {
+    const line = raw.replace(/\s+$/, "");
+    const head = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+    if (head) {
+      key = head[1].toLowerCase();
+      out[key] = head[2].replace(/^[>|][-+]?\s*/, "").trim();
+      continue;
+    }
+    if (key && /^\s+\S/.test(line)) {
+      const part = line.trim();
+      out[key] = out[key] ? out[key] + " " + part : part;
+    }
+  }
+  const name = (out.name ?? "").trim();
+  if (!name)
+    return null;
+  return { name, description: (out.description ?? "").replace(/\s+/g, " ").trim() };
+}
+function readSkillDir(root) {
+  const out = [];
+  try {
+    if (!existsSync2(root))
+      return out;
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory())
+        continue;
+      try {
+        const text = readFileSync2(join2(root, entry.name, "SKILL.md"), "utf8");
+        const parsed = parseSkillFrontmatter(text);
+        if (parsed)
+          out.push({ ...parsed, description: parsed.description.slice(0, 400) });
+      } catch {
+      }
+    }
+  } catch {
+  }
+  return out;
+}
+function defaultSkillDirs(cwd, home = homedir()) {
+  return [
+    join2(cwd, ".omp", "skills"),
+    join2(home, ".omp", "agent", "skills"),
+    join2(home, ".agents", "skills")
+  ];
+}
+function loadSkillRoster(dirs) {
+  const byName = /* @__PURE__ */ new Map();
+  for (const dir of dirs) {
+    for (const skill of readSkillDir(dir)) {
+      if (!byName.has(skill.name))
+        byName.set(skill.name, skill);
+    }
+  }
+  return [...byName.values()];
+}
+function userAlreadyChose(text, roster) {
+  const lower = text.toLowerCase();
+  if (/\/skill:[a-z0-9_-]+/i.test(text))
+    return true;
+  return roster.some((s) => s.name.length > 3 && lower.includes(s.name.toLowerCase()));
+}
+function createSkillRouter(options) {
+  const now = options.now ?? Date.now;
+  const debounceMs = options.debounceMs ?? ROUTE_DEBOUNCE_MS;
+  const ttl = options.cacheTtlMs ?? ROUTE_CACHE_TTL_MS;
+  const cache = /* @__PURE__ */ new Map();
+  const counters = { cached: 0, superseded: 0, judged: 0 };
+  let seq = 0;
+  let inFlight = null;
+  const key = (text) => text.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 2e3);
+  let lastArrival = null;
+  return {
+    async route(text, roster) {
+      const cacheKey = key(text);
+      const hit = cache.get(cacheKey);
+      if (hit && now() - hit.at < ttl) {
+        counters.cached++;
+        return hit.answer;
+      }
+      if (hit)
+        cache.delete(cacheKey);
+      const mine = ++seq;
+      const arrivedAt = now();
+      const inBurst = debounceMs > 0 && lastArrival !== null && arrivedAt - lastArrival < debounceMs;
+      lastArrival = arrivedAt;
+      if (inBurst) {
+        await new Promise((r) => setTimeout(r, debounceMs));
+        if (mine !== seq) {
+          counters.superseded++;
+          return null;
+        }
+      }
+      while (inFlight) {
+        await inFlight.catch(() => void 0);
+        if (mine !== seq) {
+          counters.superseded++;
+          return null;
+        }
+      }
+      const candidates = shortlist(text, roster);
+      if (candidates.length === 0)
+        return null;
+      const mineStill = () => mine === seq;
+      const pending = options.judge(text, candidates);
+      inFlight = pending;
+      let answer;
+      try {
+        answer = await pending;
+      } finally {
+        if (inFlight === pending)
+          inFlight = null;
+      }
+      counters.judged++;
+      if (!mineStill()) {
+        counters.superseded++;
+        return null;
+      }
+      cache.set(cacheKey, { answer, at: now() });
+      return answer;
+    },
+    stats: () => ({ ...counters })
+  };
+}
+function shortlist(text, roster) {
+  const picked = lexicalShortlist(text, [...roster], { limit: MAX_CANDIDATES });
+  const byName = new Map(roster.map((s) => [s.name, s]));
+  const out = [];
+  for (const entry of picked) {
+    const name = typeof entry === "string" ? entry : entry.name;
+    const found = byName.get(name);
+    if (found)
+      out.push(found);
+  }
+  if (out.length > 0)
+    return out;
+  return roster.slice(0, MAX_CANDIDATES);
+}
+function skillHint(answer) {
+  if (!answer.skill)
+    return null;
+  return "[jev] Consider loading skill: " + answer.skill + " (" + Math.round(answer.confidence * 100) + "% from the installed roster)";
+}
+
 // dist/extension.js
 var ENV = process.env;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var maxPerMin = envNum(ENV, "OMP_JEV_MAX_CALLS_PER_MIN", 120);
 var guard = maxPerMin > 0 ? createBudgetGuard({ maxPerWindow: maxPerMin, windowMs: 6e4 }) : null;
 var persistentCache = createPersistentCache({
-  dir: (ENV.OMP_JEV_CACHE_DIR ?? "").trim() || join2(homedir(), ".omp", "cache", "jev-harness"),
+  dir: (ENV.OMP_JEV_CACHE_DIR ?? "").trim() || join3(homedir2(), ".omp", "cache", "jev-harness"),
   ttlMs: envNum(ENV, "OMP_JEV_CACHE_TTL_MS", DAY_MS)
 });
 function jevConfig(modelOverride, redact) {
@@ -1050,125 +1582,82 @@ function jevConfig(modelOverride, redact) {
   return withPersistentCache(cfg, persistentCache);
 }
 var gateLog = createDecisionLog((ENV.OMP_JEV_DECISION_LOG ?? "").trim() ? { sink: jsonlSink((ENV.OMP_JEV_DECISION_LOG ?? "").trim()) } : {});
+var refusals = createTracedLedger(ENV.OMP_JEV_DECISION_LOG);
+var sessionDisabled = false;
+var skillRouter = createSkillRouter({
+  judge: async (text, candidates) => {
+    const cfg = jevConfig(void 0, redactOn(ENV, "hook"));
+    const result = await routeSkill(cfg, text, candidates, {
+      minConfidence: SKILL_MIN_CONFIDENCE,
+      maxCandidates: candidates.length
+    });
+    return { skill: result.skill, confidence: result.confidence };
+  }
+});
 function jevExtension(pi) {
   const z = pi.zod;
-  const questionSchema = z.object({
-    type: z.enum(["noul", "choice", "score"]).describe("Question primitive"),
-    instructions: z.string().describe("The single narrow judgment to make"),
-    criteria: z.union([z.array(z.string()), z.record(z.string(), z.string())]).optional().describe("For choice: {key: description}. For score: ordered [low..high] levels.")
-  }).passthrough();
   pi.registerTool({
-    name: "jev_ask",
-    label: "Jev Ask",
-    description: "Ask TypeSafe's Jev (System One) typed questions about a state and get calibrated probabilities. questions is a map of id -> {type: 'noul'|'choice'|'score', instructions, criteria?}. noul returns P(yes); choice returns the winning key + probabilities + confidence; score returns a probability-weighted level. Use for routing, ranking, extraction, verification, and confidence-gated decisions where code needs semantic judgment rather than generated text.",
-    parameters: z.object({
-      state: z.union([z.string(), z.record(z.string(), z.any()), z.array(z.any())]).describe("The content to judge \u2014 text, or a JSON object with named fields referenced by backticked paths."),
-      questions: z.record(z.string(), questionSchema).describe("Map of question id -> question definition."),
-      model: z.string().optional().describe("Override model (default jev-latest).")
-    }),
-    loadMode: "essential",
-    approval: "read",
-    async execute(_id, params, signal) {
-      const cfg = jevConfig(params.model, redactOn(ENV, "tool"));
-      const result = await askJev(cfg, params.state, params.questions, signal ?? void 0);
-      return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        details: result
-      };
-    }
-  });
-  pi.registerTool({
-    name: "jev_models",
-    label: "Jev Models",
-    description: "List the TypeSafe System One models available to the configured API key.",
-    parameters: z.object({}),
-    loadMode: "essential",
-    approval: "read",
-    async execute(_id, _params, _signal) {
-      const cfg = jevConfig();
-      const models = await listJevModels(cfg);
-      const text = JSON.stringify(models, null, 2);
-      return { content: [{ type: "text", text }], details: { models } };
-    }
-  });
-  pi.registerTool({
-    name: "jev_route_skills",
-    label: "Jev Route Skills",
-    description: "Rank the installed skill roster against a task description using one Jev call. Pass the task text and the candidate skill names; returns a relevance ranking plus a no-skill-needed probability. Advisory: decide from the result, do not blindly load the top hit.",
+    name: "jev",
+    label: "Jev",
+    description: "Ask TypeSafe's Jev (System One) for one narrow, calibrated judgment over a state, then act on the probability in code. Pick mode: 'route_skills' ranks skill names against a task (returns the best name, or null to abstain); 'browse_action' picks the next browser operation from a page snapshot; 'pick_tool' picks one tool for a task and flags whether it needs confirmation. Every mode is ADVISORY \u2014 it returns a decision, it never executes anything, and you must validate the choice before acting (an element index against the live snapshot, a tool name against the real roster). For typed questions you want to ask yourself (noul/choice/score over arbitrary state), use the native judge() prelude inside eval \u2014 it is the same model and needs no tool call.",
     loadMode: "discoverable",
-    parameters: z.object({
-      task: z.string().describe("The user's task or first message to route."),
-      skills: z.array(z.string()).describe("Candidate skill names to rank.")
-    }),
     approval: "read",
-    async execute(_id, params, signal) {
-      const cfg = jevConfig(void 0, redactOn(ENV, "tool"));
-      const result = await routeSkill(cfg, params.task, params.skills.map((name) => ({ name })), { signal: signal ?? void 0 });
-      const hint = result.skill !== null ? "Consider loading skill: " + result.skill : "No listed skill is relevant.";
-      return {
-        content: [{ type: "text", text: hint + "\n\n" + JSON.stringify(result, null, 2) }],
-        details: result
-      };
-    }
-  });
-  pi.registerTool({
-    name: "jev_browse_action",
-    label: "Jev Browse Goal",
-    description: "Given a goal and a numbered element table from a page snapshot, ask Jev to pick the single next browser action. Returns the operation plus the chosen target. ADVISORY: this tool does not execute anything \u2014 validate the returned index against the live snapshot and act in code.",
     parameters: z.object({
-      goal: z.string().describe("What the user wants to achieve on the page."),
+      mode: z.enum(["route_skills", "browse_action", "pick_tool"]).describe("Which judgment to make."),
+      task: z.string().optional().describe("route_skills / pick_tool: the task, request, or question to judge."),
+      skills: z.array(z.object({ name: z.string(), description: z.string().optional() })).optional().describe("route_skills: candidate skills to rank. Descriptions matter \u2014 without them a browser task routes to a desktop-automation skill."),
+      tools: z.array(z.object({
+        name: z.string(),
+        description: z.string(),
+        args: z.record(z.string(), z.string()).optional().describe("Map of arg name -> type/description, for closed-set args.")
+      })).optional().describe("pick_tool: candidate tools to choose from."),
+      context: z.string().optional().describe("pick_tool: extra context, e.g. a recent error or the file being worked on."),
+      goal: z.string().optional().describe("browse_action: what the user wants on the page."),
       elements: z.array(z.object({
         index: z.string().describe("Stable element index from the snapshot, e.g. '3' or '5:2' for a select option."),
         label: z.string().describe("Human-visible label."),
         role: z.string().optional().describe("ARIA role, e.g. combobox / button / link."),
         value: z.string().optional().describe("Current value, if any."),
         operations: z.array(z.string()).describe("Operations this element supports, e.g. ['CLICK','TYPE_TEXT'].")
-      })).describe("Numbered interactive elements from the current snapshot."),
-      page: z.object({ url: z.string(), title: z.string().optional(), text: z.string().optional() }).describe("Current page context."),
+      })).optional().describe("browse_action: numbered interactive elements from the current snapshot."),
+      page: z.object({ url: z.string(), title: z.string().optional(), text: z.string().optional() }).optional().describe("browse_action: current page context."),
       recent_actions: z.array(z.object({
         action: z.string(),
         kind: z.string().optional(),
         page_changed: z.boolean().optional()
-      })).optional().describe("Last few actions taken.")
+      })).optional().describe("browse_action: last few actions taken.")
     }),
-    loadMode: "discoverable",
-    approval: "read",
     async execute(_id, params, signal) {
+      const abort = signal ?? void 0;
       const cfg = jevConfig(void 0, redactOn(ENV, "tool"));
-      const result = await chooseBrowserAction(cfg, {
-        goal: params.goal,
-        page: params.page,
-        elements: params.elements,
-        recentActions: (params.recent_actions ?? []).map((r) => ({
-          action: String(r?.action ?? ""),
-          kind: r?.kind,
-          pageChanged: r?.page_changed
-        }))
-      }, { signal: signal ?? void 0 });
-      return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        details: result
-      };
-    }
-  });
-  pi.registerTool({
-    name: "jev_pick_tool",
-    label: "Jev Pick Tool",
-    description: "Given a task and a list of candidate tools with their schemas, ask Jev which single tool to use and whether it needs confirmation. Best when the candidate set is enumerable (few tools, closed-set args). ADVISORY: this does not execute the tool.",
-    parameters: z.object({
-      task: z.string().describe("What the user is asking for."),
-      tools: z.array(z.object({
-        name: z.string(),
-        description: z.string(),
-        args: z.record(z.string(), z.string()).optional().describe("Map of arg name -> type/description, for closed-set args.")
-      })).describe("Candidate tools to choose from."),
-      context: z.string().optional().describe("Extra context, e.g. recent error or file being worked on.")
-    }),
-    loadMode: "discoverable",
-    approval: "read",
-    async execute(_id, params, signal) {
-      const cfg = jevConfig(void 0, redactOn(ENV, "tool"));
-      const result = await pickTool(cfg, { task: params.task, tools: params.tools, context: params.context }, { signal: signal ?? void 0 });
+      const text = (value) => JSON.stringify(value, null, 2);
+      if (params.mode === "route_skills") {
+        const candidates = params.skills ?? [];
+        const result2 = await routeSkill(cfg, String(params.task ?? ""), candidates, {
+          signal: abort
+        });
+        const out2 = {
+          skill: result2.skill,
+          confidence: result2.confidence,
+          probabilities: result2.probabilities,
+          hint: result2.skill === null ? "No listed skill is relevant." : "Consider loading skill: " + result2.skill
+        };
+        return { content: [{ type: "text", text: text(out2) }], details: out2 };
+      }
+      if (params.mode === "browse_action") {
+        const result2 = await chooseBrowserAction(cfg, {
+          goal: String(params.goal ?? ""),
+          page: params.page ?? { url: "" },
+          elements: params.elements ?? [],
+          recentActions: (params.recent_actions ?? []).map((r) => ({
+            action: String(r?.action ?? ""),
+            kind: r?.kind,
+            pageChanged: r?.page_changed
+          }))
+        }, { signal: abort });
+        return { content: [{ type: "text", text: text(result2) }], details: result2 };
+      }
+      const result = await pickTool(cfg, { task: String(params.task ?? ""), tools: params.tools ?? [], context: params.context }, { signal: abort });
       const out = {
         tool: result.tool,
         confidence: result.confidence,
@@ -1176,14 +1665,11 @@ function jevExtension(pi) {
         confirm_required: result.confirmRequired,
         act: result.act
       };
-      return {
-        content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
-        details: out
-      };
+      return { content: [{ type: "text", text: text(out) }], details: out };
     }
   });
-  pi.on("tool_call", async (event) => {
-    if (!autoOn(ENV, "OMP_JEV_GATE"))
+  pi.on("tool_call", async (event, ctx) => {
+    if (!autoOn(ENV, "OMP_JEV_GATE") || sessionDisabled)
       return;
     try {
       const name = String(event?.toolName ?? "");
@@ -1191,83 +1677,92 @@ function jevExtension(pi) {
         return;
       const cfg = jevConfig(void 0, redactOn(ENV, "hook"));
       const startedAt = Date.now();
-      const verdict = await judgeDestructive(cfg, { tool: name, input: event?.input ?? {}, cwd: process.cwd() }, { threshold: GATE_THRESHOLD });
+      const verdict = await judgeDestructiveDual(cfg, { tool: name, input: event?.input ?? {}, cwd: process.cwd() }, { threshold: GATE_THRESHOLD, signal: withDeadline(ctx?.signal, GATE_DEADLINE_MS) });
       gateLog.record({
         ts: (/* @__PURE__ */ new Date()).toISOString(),
         kind: "omp_gate",
         model: cfg.model ?? "unknown",
         digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, [
-          "destructive"
+          "destructive",
+          "category"
         ]),
-        answers: { destructive: verdict.destructive },
+        answers: { destructive: verdict.destructive, category: verdict.category },
         threshold: GATE_THRESHOLD,
-        action: verdict.blocked ? "block" : "allow",
+        action: verdict.decision,
         latencyMs: Date.now() - startedAt
       });
-      if (verdict.blocked) {
+      if (verdict.decision === "allow")
+        return;
+      refusals.record("gate:" + name, verdict.decision + ":" + verdict.category);
+      if (verdict.decision === "block") {
         return {
           block: true,
-          reason: "jev gate: destructive effect likely (" + verdict.destructive.toFixed(2) + "). Re-issue with explicit confirmation or adjust the command."
+          reason: "jev gate: destructive (" + verdict.destructive.toFixed(2) + ", category=" + verdict.category + "). The tool alone cannot undo this. If the user has explicitly asked for it, re-issue the same call with that confirmation stated in the task; otherwise use a safer equivalent (delete the specific path, not a glob) or ask the user first."
         };
       }
+      return {
+        block: true,
+        reason: "jev gate: possibly destructive but UNPROVEN (" + verdict.destructive.toFixed(2) + ", category=" + verdict.category + ", confidence=" + verdict.confidence.toFixed(2) + "). Ask the user to confirm this exact call; if they confirm, state that confirmation and re-issue it unchanged."
+      };
     } catch (err) {
-      try {
-        pi.logger.warn("jev gate: allowed on error (fail-open)", { error: String(err) });
-      } catch {
-      }
+      const decision = decideOnFailure(err, "gate");
+      const { disabled } = reportFailure(pi.logger, decision);
+      if (disabled)
+        sessionDisabled = true;
+      refusals.record("gate:error", decision.kind);
       return;
     }
   });
+  let pendingHint = null;
   pi.on("input", async (event, ctx) => {
-    if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER"))
+    if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER") || sessionDisabled)
       return;
     try {
       const text = String(event?.text ?? event?.prompt ?? "");
-      if (text.length < 12)
+      if (text.length < MIN_PROMPT_CHARS)
         return;
-      let roster = [];
-      try {
-        roster = (ctx?.skills ?? []).map((s) => ({
-          name: String(s?.name ?? ""),
-          description: String(s?.description ?? "")
-        })).filter((s) => s.name !== "");
-      } catch {
-        roster = [];
-      }
-      if (roster.length === 0)
+      const roster = loadSkillRoster(defaultSkillDirs(ctx?.cwd ?? process.cwd()));
+      if (roster.length === 0) {
+        refusals.record("router:roster", "empty-roster");
         return;
-      const lower = text.toLowerCase();
-      const scored = roster.map((s) => {
-        const parts = s.name.toLowerCase().split(/[-_]/);
-        let score = 0;
-        for (const part of parts) {
-          if (part.length > 3 && lower.includes(part))
-            score += 2;
-          if (part.length <= 4 && lower.includes(part))
-            score += 1;
-        }
-        return { name: s.name, score };
-      });
-      const lexical = scored.filter((x) => x.score > 0).map((x) => x.name);
-      const shortlist = (lexical.length > 0 ? lexical : roster.map((s) => s.name)).slice(0, 12);
-      if (shortlist.length === 0)
+      }
+      if (userAlreadyChose(text, roster)) {
+        refusals.record("router:user-selected", "already-chosen");
         return;
-      const byName = /* @__PURE__ */ new Map();
-      for (const s of roster) {
-        byName.set(s.name, s.description.replace(/\s+/g, " ").slice(0, 180));
       }
-      const cfg = jevConfig(void 0, redactOn(ENV, "hook"));
-      const result = await routeSkill(cfg, text, shortlist.map((name) => ({ name, description: byName.get(name) ?? "" })), { minConfidence: SKILL_MIN_CONFIDENCE, maxCandidates: 12 });
-      if (result.skill !== null) {
-        return { additionalContext: "[jev] Consider loading skill: " + result.skill };
+      const answer = await skillRouter.route(text, roster);
+      if (answer === null) {
+        refusals.record("router", "superseded-or-debounced");
+        return;
       }
+      if (answer.skill === null) {
+        refusals.record("router:abstain", "below-confidence");
+        return;
+      }
+      const hint = skillHint(answer);
+      if (hint !== null)
+        pendingHint = hint;
     } catch (err) {
-      try {
-        pi.logger.debug("jev skill router skipped", { error: String(err) });
-      } catch {
-      }
-      return;
+      const decision = decideOnFailure(err, "skill router");
+      const { disabled } = reportFailure(pi.logger, decision);
+      if (disabled)
+        sessionDisabled = true;
+      refusals.record("router:error", decision.kind);
     }
+  });
+  pi.on("before_agent_start", async () => {
+    if (pendingHint === null)
+      return;
+    const hint = pendingHint;
+    pendingHint = null;
+    return {
+      message: {
+        customType: "jev-skill-hint",
+        content: hint,
+        display: false,
+        attribution: "agent"
+      }
+    };
   });
   pi.on("session_before_compact", async (event) => {
     if (!autoOn(ENV, "OMP_JEV_CONTEXT"))
@@ -1319,12 +1814,11 @@ function jevExtension(pi) {
         }
       };
     } catch (err) {
-      try {
-        pi.logger.warn("jev_compact failed, falling back to native compaction", {
-          error: String(err)
-        });
-      } catch {
-      }
+      const decision = decideOnFailure(err, "compact");
+      const { disabled } = reportFailure(pi.logger, decision);
+      if (disabled)
+        sessionDisabled = true;
+      refusals.record("compact:error", decision.kind);
       return;
     }
   });

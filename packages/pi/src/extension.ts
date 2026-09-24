@@ -11,19 +11,13 @@
  * undefined (hooks), so the host agent never stalls because Jev is down.
  * The API key is read from the environment on each call and never logged.
  */
-import {
-  askJev,
-  chooseBrowserAction,
-  listJevModels,
-  noul,
-  pickTool,
-  routeSkill,
-  type Questions,
-} from "@jev-harness/core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { noul, type Questions } from "@jev-harness/core";
+import { lexicalShortlist, type JevToolkit } from "@jev-harness/kit";
 import { Type } from "typebox";
 
-import { collectToolPairs, keepThreshold, resolveJevConfig } from "./compact.js";
+import { collectToolPairs, keepThreshold } from "./compact.js";
+import { createPiToolkit } from "./config.js";
 
 /** Bound once; the pure helpers take it as a parameter so tests need no globals. */
 const ENV = process.env;
@@ -40,6 +34,9 @@ function errorText(tool: string, err: unknown): string {
 }
 
 export default function jevPi(pi: ExtensionAPI): void {
+  // Fresh config per call (the kit re-reads the environment each time), fail
+  // open: the key is only required once a call is actually made.
+  const kit: JevToolkit = createPiToolkit();
   pi.registerTool({
     name: "jev_ask",
     label: "Jev ask",
@@ -60,12 +57,9 @@ export default function jevPi(pi: ExtensionAPI): void {
     }),
     execute: async (_id, params, signal) => {
       try {
-        const response = await askJev(
-          resolveJevConfig(ENV),
-          params.state,
-          params.questions as Questions,
-          signal ?? undefined,
-        );
+        const response = await kit.ask(params.state, params.questions as Questions, {
+          signal: signal ?? undefined,
+        });
         return ok(JSON.stringify(response.answers, null, 2), {
           model: response.model,
           usage: response.usage,
@@ -85,7 +79,7 @@ export default function jevPi(pi: ExtensionAPI): void {
     parameters: Type.Object({}),
     execute: async () => {
       try {
-        const models = await listJevModels(resolveJevConfig(ENV));
+        const models = await kit.models();
         const lines = models.map((m) => (m.description ? m.name + " - " + m.description : m.name));
         return ok(lines.length > 0 ? lines.join("\n") : "No Jev models returned.", {
           count: models.length,
@@ -122,8 +116,7 @@ export default function jevPi(pi: ExtensionAPI): void {
     }),
     execute: async (_id, params, signal) => {
       try {
-        const result = await routeSkill(
-          resolveJevConfig(ENV),
+        const result = await kit.routeSkills(
           params.message,
           params.skills.map((s) => ({
             name: s.name,
@@ -158,8 +151,7 @@ export default function jevPi(pi: ExtensionAPI): void {
     }),
     execute: async (_id, params, signal) => {
       try {
-        const result = await pickTool(
-          resolveJevConfig(ENV),
+        const result = await kit.pickTool(
           {
             task: params.task,
             tools: params.tools.map((t) => ({
@@ -212,8 +204,7 @@ export default function jevPi(pi: ExtensionAPI): void {
     }),
     execute: async (_id, params, signal) => {
       try {
-        const result = await chooseBrowserAction(
-          resolveJevConfig(ENV),
+        const result = await kit.browseAction(
           {
             goal: params.goal,
             page: {
@@ -272,8 +263,7 @@ export default function jevPi(pi: ExtensionAPI): void {
             p.resultText,
         };
       }
-      const response = await askJev(
-        resolveJevConfig(ENV),
+      const response = await kit.ask(
         {
           pairs: pairs.map((p) => ({
             tool: p.tool,
@@ -282,7 +272,7 @@ export default function jevPi(pi: ExtensionAPI): void {
           })),
         },
         questions,
-        event.signal,
+        { signal: event.signal },
       );
       const decisions = pairs.map((p) => {
         let keepCall = 1;
@@ -343,12 +333,18 @@ export default function jevPi(pi: ExtensionAPI): void {
       if (!(process.env.TYPESAFE_API_KEY ?? "").trim()) return undefined;
       const tools = pi.getAllTools();
       if (tools.length === 0) return undefined;
-      void routeSkill(
-        resolveJevConfig(ENV),
-        text.slice(0, 2000),
-        tools.map((t) => ({ name: t.name, description: t.description ?? "" })),
-        { minConfidence: 0.5 },
-      )
+      // Cheap lexical prefilter before spending a call: first-message match in
+      // core slices to maxCandidates (12), so a big tool roster would otherwise
+      // crowd out the relevant names.
+      const roster = tools.map((t) => ({ name: t.name, description: t.description ?? "" }));
+      const shortlist = lexicalShortlist(text.slice(0, 2000), roster);
+      const byName = new Map(roster.map((s) => [s.name, s.description]));
+      void kit
+        .routeSkills(
+          text.slice(0, 2000),
+          shortlist.map((name) => ({ name, description: byName.get(name) ?? "" })),
+          { minConfidence: 0.5 },
+        )
         .then((r) => {
           if (r.skill) {
             ctx.ui.notify(
