@@ -12,7 +12,7 @@
  * The API key is read from the environment on each call and never logged.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { noul, type Questions } from "@jev-harness/core";
+import { noul, withFailMode, type Questions } from "@jev-harness/core";
 import { lexicalShortlist, type JevToolkit } from "@jev-harness/kit";
 import { Type } from "typebox";
 
@@ -319,95 +319,101 @@ export default function jevPi(pi: ExtensionAPI): void {
   });
 
   pi.on("session_before_compact", async (event) => {
-    try {
-      if (!(process.env.TYPESAFE_API_KEY ?? "").trim()) return undefined;
-      const pairs = collectToolPairs(event.branchEntries);
-      if (pairs.length === 0) return undefined;
-      const threshold = keepThreshold(ENV.OMP_JEV_KEEP_THRESHOLD);
-      const questions: Questions = {};
-      for (const p of pairs) {
-        questions["keep_call_" + p.key] = {
-          type: "noul",
-          instructions:
-            "This tool call is still load-bearing for the ongoing task; " +
-            "dropping it from context would lose information the agent still needs. " +
-            "Tool: " +
-            p.tool +
-            ". Arguments: " +
-            p.argsText,
-        };
-        questions["keep_result_" + p.key] = {
-          type: "noul",
-          instructions:
-            "The result of this tool call is still needed for the ongoing task; " +
-            "dropping it would lose information the agent still needs. " +
-            "Tool: " +
-            p.tool +
-            ". Result (head): " +
-            p.resultText,
-        };
-      }
-      const response = await kit.ask(
-        {
-          pairs: pairs.map((p) => ({
-            tool: p.tool,
-            argsText: p.argsText,
-            resultText: p.resultText,
-          })),
-        },
-        questions,
-        { signal: event.signal },
-      );
-      const decisions = pairs.map((p) => {
-        let keepCall = 1;
-        let keepResult = 1;
-        try {
-          keepCall = noul(response, "keep_call_" + p.key);
-        } catch {
-          /* keep the default */
+    // Fail-open, stated once instead of a hand-rolled catch. The callback is
+    // the whole hook body, so exactly the paths the catch covered (no key, a
+    // Jev outage, an unreadable answer) still resolve to `undefined` and OMP
+    // runs its own compaction.
+    return await withFailMode(
+      "open",
+      async () => {
+        if (!(process.env.TYPESAFE_API_KEY ?? "").trim()) return undefined;
+        const pairs = collectToolPairs(event.branchEntries);
+        if (pairs.length === 0) return undefined;
+        const threshold = keepThreshold(ENV.OMP_JEV_KEEP_THRESHOLD);
+        const questions: Questions = {};
+        for (const p of pairs) {
+          questions["keep_call_" + p.key] = {
+            type: "noul",
+            instructions:
+              "This tool call is still load-bearing for the ongoing task; " +
+              "dropping it from context would lose information the agent still needs. " +
+              "Tool: " +
+              p.tool +
+              ". Arguments: " +
+              p.argsText,
+          };
+          questions["keep_result_" + p.key] = {
+            type: "noul",
+            instructions:
+              "The result of this tool call is still needed for the ongoing task; " +
+              "dropping it would lose information the agent still needs. " +
+              "Tool: " +
+              p.tool +
+              ". Result (head): " +
+              p.resultText,
+          };
         }
-        try {
-          keepResult = noul(response, "keep_result_" + p.key);
-        } catch {
-          /* keep the default */
-        }
-        return {
-          key: p.key,
-          tool: p.tool,
-          keepCall,
-          keepResult,
-          stale: keepCall < threshold && keepResult < threshold,
-        };
-      });
-      const stale = decisions.filter((d) => d.stale);
-      if (stale.length === 0) return undefined;
-      const firstEntryId = event.branchEntries[0]?.id;
-      if (!firstEntryId) return undefined;
-      const staleNames = stale.map((d) => d.tool).join(", ");
-      const summary =
-        "jev-compaction: judged " +
-        String(pairs.length) +
-        " tool pair(s); " +
-        String(stale.length) +
-        " stale (" +
-        staleNames +
-        "). History kept verbatim; per-pair scores in details.";
-      return {
-        compaction: {
-          summary,
-          firstKeptEntryId: firstEntryId,
-          tokensBefore: event.preparation.tokensBefore,
-          details: {
-            shortSummary:
-              "jev: " + String(stale.length) + "/" + String(pairs.length) + " tool pairs stale",
-            threshold,
-            decisions,
+        const response = await kit.ask(
+          {
+            pairs: pairs.map((p) => ({
+              tool: p.tool,
+              argsText: p.argsText,
+              resultText: p.resultText,
+            })),
           },
-        },
-      };
-    } catch {
-      return undefined;
-    }
+          questions,
+          { signal: event.signal },
+        );
+        const decisions = pairs.map((p) => {
+          let keepCall = 1;
+          let keepResult = 1;
+          try {
+            keepCall = noul(response, "keep_call_" + p.key);
+          } catch {
+            /* keep the default */
+          }
+          try {
+            keepResult = noul(response, "keep_result_" + p.key);
+          } catch {
+            /* keep the default */
+          }
+          return {
+            key: p.key,
+            tool: p.tool,
+            keepCall,
+            keepResult,
+            stale: keepCall < threshold && keepResult < threshold,
+          };
+        });
+        const stale = decisions.filter((d) => d.stale);
+        if (stale.length === 0) return undefined;
+        const firstEntryId = event.branchEntries[0]?.id;
+        if (!firstEntryId) return undefined;
+        const staleNames = stale.map((d) => d.tool).join(", ");
+        const summary =
+          "jev-compaction: judged " +
+          String(pairs.length) +
+          " tool pair(s); " +
+          String(stale.length) +
+          " stale (" +
+          staleNames +
+          "). History kept verbatim; per-pair scores in details.";
+        return {
+          compaction: {
+            summary,
+            firstKeptEntryId: firstEntryId,
+            tokensBefore: event.preparation.tokensBefore,
+            details: {
+              shortSummary:
+                "jev: " + String(stale.length) + "/" + String(pairs.length) + " tool pairs stale",
+              threshold,
+              decisions,
+            },
+          },
+        };
+      },
+      { open: undefined, closed: undefined },
+    );
   });
 
   pi.on("input", (event, ctx) => {

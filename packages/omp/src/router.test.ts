@@ -3,10 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  LOCAL_ROUTE_MIN_SCORE,
   MAX_CANDIDATES,
   createSkillRouter,
   defaultSkillDirs,
   loadSkillRoster,
+  localRoute,
+  localRouteHint,
   parseSkillFrontmatter,
   readSkillDir,
   shortlist,
@@ -287,5 +290,41 @@ describe("skillHint", () => {
       "[jev] Consider loading skill: fh6-modding (72% from the installed roster)",
     );
     expect(skillHint({ skill: null, confidence: 0.9 })).toBeNull();
+  });
+});
+
+describe("localRoute (degraded path)", () => {
+  const browser: RosterSkill[] = [
+    { name: "playwright-cli", description: "Drive a real browser with Playwright" },
+  ];
+
+  it("promotes a strong lexical match", () => {
+    const route = localRoute("please automate the playwright browser flow now", browser);
+    expect(route).not.toBeNull();
+    expect(route!.skill).toBe("playwright-cli");
+    // Two shared content tokens over 7x7 tokens = 0.286, above the floor.
+    expect(route!.score).toBeGreaterThanOrEqual(LOCAL_ROUTE_MIN_SCORE);
+  });
+
+  it("drops an incidental one-word overlap instead of guessing", () => {
+    // "browser" alone scores 0.10 against the same description — above core's
+    // 0.05 plausibility floor, below this adapter's 0.2.
+    const route = localRoute("my browser window keeps flickering", browser);
+    expect(route).toBeNull();
+  });
+
+  it("returns null when nothing overlaps at all", () => {
+    expect(localRoute("rename every incident ticket in the tracker", browser)).toBeNull();
+  });
+
+  it("returns null for an empty roster or an empty prompt", () => {
+    expect(localRoute("drive the playwright browser", [])).toBeNull();
+    expect(localRoute("", browser)).toBeNull();
+  });
+
+  it("labels its hint as local rather than as a Jev confidence", () => {
+    expect(localRouteHint({ skill: "playwright-cli", score: 0.286 })).toBe(
+      "[jev] Consider loading skill: playwright-cli (29% local keyword match; Jev was unreachable)",
+    );
   });
 });

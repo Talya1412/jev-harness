@@ -77,9 +77,17 @@ tooling — the previous `jev_ask` re-implemented the native `judge()` /
   every later call would fail identically while burning a host handler's
   latency budget — `rate_limit` backs off, `network` stays quiet, and anything
   else is surfaced in the logs.
-- **Refusal ledger.** Gate blocks, routing abstains, and compaction deferrals
-  are recorded with their reason, so a declined action leaves a trace instead of
-  vanishing.
+- **Degraded routing.** When the Jev routing call _fails_ — not when it
+  abstains — the hook reroutes locally with core's `localRouteSkill` and promotes
+  a match only at overlap ≥ **0.2** (`LOCAL_ROUTE_MIN_SCORE`, on that router's own
+  `hits / sqrt(|message| × |name+description|)` scale). The floor is deliberately
+  stricter than core's 0.05 plausibility floor: one incidental shared word
+  scores ~0.08 and would send the model after the wrong skill, while two content
+  words over short descriptions score ~0.29 and are kept. Below the floor, no
+  hint is produced at all — a wrong hint costs more than none.
+- **Refusal ledger.** Gate blocks, routing abstains, compaction deferrals, and
+  local fallbacks (match or no-match) are recorded with their reason, so a
+  declined action leaves a trace instead of vanishing.
 - **Fail-open.** Apart from an explicit destructive `block`, no Jev failure ever
   stops the agent.
 
@@ -87,7 +95,7 @@ tooling — the previous `jev_ask` re-implemented the native `judge()` /
 
 - `src/extension.ts` — default-export factory `(pi: ExtensionAPI) => void`; all tools + hooks.
 - `src/compact.ts` — pure verbatim-compaction planning + rendering (no host, no network).
-- `src/router.ts` — pure skill-roster loading and the single-flight, cached ranked-merge router.
+- `src/router.ts` — pure skill-roster loading, the single-flight, cached ranked-merge router, and the conservative local router used on the degraded path.
 - `src/failure.ts` — the one place a Jev transport failure becomes a decision.
 - `src/config.ts` — env parsing, thresholds re-exported from core, deadline helper.
 - `src/index.ts` — re-exports the factory.

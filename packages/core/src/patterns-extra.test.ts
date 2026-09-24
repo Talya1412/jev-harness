@@ -8,6 +8,7 @@ import {
   chooseSubagent,
   debateJudge,
 } from "../src/patterns-extra.js";
+import { gateInjection, THRESHOLDS } from "../src/patterns.js";
 import type { JevResponse } from "../src/types.js";
 
 /** Route every call through a canned response, recording the request bodies. */
@@ -71,6 +72,97 @@ describe("detectPromptInjection", () => {
       { content: "Summarize the attached article." },
     );
     expect(r.blocked).toBe(false);
+  });
+
+  it("blocks exactly at the default threshold (0.6 is inclusive)", async () => {
+    const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.6 } });
+    const r = await detectPromptInjection({ apiKey: "k", fetchImpl }, { content: "c" });
+    expect(r.injection).toBe(0.6);
+    expect(r.blocked).toBe(true);
+  });
+
+  it("allows just below the default threshold", async () => {
+    const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.5999 } });
+    const r = await detectPromptInjection({ apiKey: "k", fetchImpl }, { content: "c" });
+    expect(r.blocked).toBe(false);
+  });
+
+  it('issues exactly one request carrying question id "injection"', async () => {
+    const { fetchImpl, seen } = jevStub({ injection: { type: "noul", noul: 0.42 } });
+    await detectPromptInjection({ apiKey: "k", fetchImpl }, { content: "c" });
+    expect(seen).toHaveLength(1);
+    expect(Object.keys(seen[0].questions)).toEqual(["injection"]);
+  });
+
+  it("truncates content to 4000, role to 200, and context to 2000 chars", async () => {
+    const { fetchImpl, seen } = jevStub({ injection: { type: "noul", noul: 0.1 } });
+    await detectPromptInjection(
+      { apiKey: "k", fetchImpl },
+      {
+        content: "c".repeat(5000),
+        role: "r".repeat(300),
+        context: "x".repeat(2500),
+      },
+    );
+    expect(seen[0].state.content).toHaveLength(4000);
+    expect(seen[0].state.role).toHaveLength(200);
+    expect(seen[0].state.context).toHaveLength(2000);
+  });
+
+  it("normalises an absent role and context to empty strings", async () => {
+    const { fetchImpl, seen } = jevStub({ injection: { type: "noul", noul: 0.1 } });
+    await detectPromptInjection({ apiKey: "k", fetchImpl }, { content: "c" });
+    expect(seen[0].state.role).toBe("");
+    expect(seen[0].state.context).toBe("");
+  });
+
+  it("rejects on a missing answer rather than guessing", async () => {
+    const { fetchImpl } = jevStub({});
+    await expect(
+      detectPromptInjection({ apiKey: "k", fetchImpl }, { content: "c" }),
+    ).rejects.toThrow(/not a valid noul/);
+  });
+
+  it("rejects on an unparseable answer", async () => {
+    const { fetchImpl } = jevStub({
+      injection: { type: "noul", noul: null },
+    } as unknown as JevResponse["answers"]);
+    await expect(
+      detectPromptInjection({ apiKey: "k", fetchImpl }, { content: "c" }),
+    ).rejects.toThrow(/not a valid noul/);
+  });
+});
+
+describe("injection threshold divergence", () => {
+  it("keeps 0.7 and 0.6 as two deliberate entry-point defaults", () => {
+    expect(THRESHOLDS.gateInjection).toBe(0.7);
+    expect(THRESHOLDS.detectPromptInjection).toBe(0.6);
+  });
+
+  it("reads its own key: 0.65 is blocked by detect (0.6) but not by gate (0.7)", async () => {
+    const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.65 } });
+    const g = await gateInjection({ apiKey: "k", fetchImpl }, { source: "s", content: "c" });
+    const d = await detectPromptInjection({ apiKey: "k", fetchImpl }, { content: "c" });
+    expect(g.injection).toBe(0.65);
+    expect(d.injection).toBe(0.65);
+    expect(g.blocked).toBe(false);
+    expect(d.blocked).toBe(true);
+  });
+
+  it("lets an explicit threshold override each key independently", async () => {
+    const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.65 } });
+    const g = await gateInjection(
+      { apiKey: "k", fetchImpl },
+      { source: "s", content: "c" },
+      { threshold: 0.6 },
+    );
+    const d = await detectPromptInjection(
+      { apiKey: "k", fetchImpl },
+      { content: "c" },
+      { threshold: 0.7 },
+    );
+    expect(g.blocked).toBe(true);
+    expect(d.blocked).toBe(false);
   });
 });
 

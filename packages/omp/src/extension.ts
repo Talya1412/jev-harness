@@ -60,8 +60,11 @@ import {
   createSkillRouter,
   defaultSkillDirs,
   loadSkillRoster,
+  localRoute,
+  localRouteHint,
   skillHint,
   userAlreadyChose,
+  type RosterSkill,
 } from "./router.js";
 
 /** `process.env` bound once, so the pure helpers stay testable. */
@@ -102,8 +105,12 @@ const gateLog = createDecisionLog(
  * never sees; without this they simply vanish. When OMP_JEV_DECISION_LOG is
  * set, each distinct refusal is also appended there as one JSON line — the same
  * file the gate's decision log uses — so the trace survives the process.
+ *
+ * Exported as a test seam: a hook's ledger record is part of its contract (the
+ * degraded router path's entry especially), and `index.ts` does not re-export
+ * this, so the package's public API is unchanged.
  */
-const refusals = createTracedLedger(ENV.OMP_JEV_DECISION_LOG);
+export const refusals = createTracedLedger(ENV.OMP_JEV_DECISION_LOG);
 
 /**
  * Set once an `auth` or `model` failure proves the configured key/model
@@ -373,10 +380,16 @@ export default function jevExtension(pi: ExtensionAPI): void {
   let pendingHint: string | null = null;
   pi.on("input", async (event: any, ctx: any) => {
     if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER") || sessionDisabled) return;
+    // Hoisted so the catch can run the degraded local router over the SAME
+    // inputs. They are assigned before the Jev call on every path that reaches
+    // it, and stay empty if this hook fails before that point — in which case
+    // the fallback has no roster and correctly declines to guess.
+    let text = "";
+    let roster: RosterSkill[] = [];
     try {
-      const text = String(event?.text ?? event?.prompt ?? "");
+      text = String(event?.text ?? event?.prompt ?? "");
       if (text.length < MIN_PROMPT_CHARS) return;
-      const roster = loadSkillRoster(defaultSkillDirs(ctx?.cwd ?? process.cwd()));
+      roster = loadSkillRoster(defaultSkillDirs(ctx?.cwd ?? process.cwd()));
       if (roster.length === 0) {
         refusals.record("router:roster", "empty-roster");
         return;
@@ -402,6 +415,24 @@ export default function jevExtension(pi: ExtensionAPI): void {
       const { disabled } = reportFailure(pi.logger, decision);
       if (disabled) sessionDisabled = true;
       refusals.record("router:error", decision.kind);
+      // Degraded path. The judgment failed, so Jev's abstain is not an answer:
+      // fall back to keyword overlap over the same roster, and promote only a
+      // match that clears LOCAL_ROUTE_MIN_SCORE. A wrong hint is worse than no
+      // hint, so an unconvincing match leaves the user with no suggestion and
+      // says so in the trail.
+      const fallback = localRoute(text, roster);
+      refusals.record(
+        "router:local-fallback",
+        fallback === null ? decision.kind + ":no-match" : decision.kind + ":" + fallback.skill,
+      );
+      if (fallback !== null) {
+        pi.logger.debug("jev_router: local fallback", {
+          skill: fallback.skill,
+          score: fallback.score,
+          failure: decision.kind,
+        });
+        pendingHint = localRouteHint(fallback);
+      }
     }
   });
 

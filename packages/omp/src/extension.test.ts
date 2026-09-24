@@ -3,7 +3,25 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import jevExtension from "../src/extension.js";
+import jevExtension, { refusals } from "../src/extension.js";
+
+/**
+ * Records every `localRoute` call the adapter makes. The degraded router path
+ * must run on a Jev failure and must NOT run on a Jev answer, and neither fact
+ * is observable from the returned hint alone — so the call itself is spied on.
+ * Everything else in router.js stays real (the factory spreads `actual`).
+ */
+const localRouteCalls = vi.hoisted(() => [] as string[]);
+vi.mock("../src/router.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/router.js")>();
+  return {
+    ...actual,
+    localRoute: (...args: Parameters<typeof actual.localRoute>) => {
+      localRouteCalls.push(args[0]);
+      return actual.localRoute(...args);
+    },
+  };
+});
 
 /** The shipped surface: ONE advisory tool + the three auto hooks. */
 const TOOL_NAMES = ["jev"];
@@ -65,6 +83,7 @@ afterEach(() => {
     else process.env[key] = saved;
   }
   savedEnv.clear();
+  localRouteCalls.length = 0;
   vi.unstubAllGlobals();
 });
 
@@ -490,5 +509,121 @@ describe("skill router hooks", () => {
     );
     expect(out).toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("degraded routing when Jev is unreachable", () => {
+  /** A throwaway roster on disk; the returned root is the hook's cwd. */
+  function skillTree(): string {
+    const root = mkdtempSync(join(tmpdir(), "jev-omp-degraded-"));
+    mkdirSync(join(root, ".omp", "skills", "playwright-cli"), { recursive: true });
+    writeFileSync(
+      join(root, ".omp", "skills", "playwright-cli", "SKILL.md"),
+      "---\nname: playwright-cli\ndescription: Drive a real browser with Playwright\n---\n\nbody\n",
+      "utf8",
+    );
+    return root;
+  }
+
+  /** An unreachable Jev: a rejected fetch, which classifies as `network`. */
+  function jevDown() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+  }
+
+  it("suggests a confident lexical match when Jev is unreachable", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    const root = skillTree();
+    jevExtension(host);
+    jevDown();
+
+    // The local router scores this ~0.40 against playwright-cli (three shared
+    // tokens over a short description), well above LOCAL_ROUTE_MIN_SCORE.
+    const out = await handlers.get("input")!(
+      { text: "drive the playwright browser flow for the login page" },
+      { cwd: root },
+    );
+    expect(out).toBeUndefined();
+
+    const startResult: any = await handlers.get("before_agent_start")!({}, { cwd: root });
+    expect(startResult.message.customType).toBe("jev-skill-hint");
+    expect(startResult.message.content).toContain("playwright-cli");
+    // The percentage shown is lexical overlap, not a Jev probability, and the
+    // line says which one it is.
+    expect(startResult.message.content).toContain("local keyword match");
+    expect(startResult.message.content).toContain("Jev was unreachable");
+    expect(startResult.message.content).not.toContain("from the installed roster");
+
+    // The trail names the outage and the skill it chose, under its own key.
+    expect(refusals.entries()).toContainEqual(
+      expect.objectContaining({ key: "router:local-fallback", reason: "network:playwright-cli" }),
+    );
+    expect(localRouteCalls).toHaveLength(1);
+  });
+
+  it("suggests nothing when the local match is unconvincing", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    const root = skillTree();
+    jevExtension(host);
+    jevDown();
+
+    // Incidental overlap only — the best match here scores ~0.12, below the
+    // 0.2 floor. A wrong hint is worse than no hint, so nothing is promoted.
+    const out = await handlers.get("input")!(
+      { text: "rename every incident ticket in the tracker" },
+      { cwd: root },
+    );
+    expect(out).toBeUndefined();
+    expect(await handlers.get("before_agent_start")!({}, { cwd: root })).toBeUndefined();
+
+    // The attempt is still recorded, as a no-match: the outage stays visible
+    // even when it produces no suggestion.
+    expect(refusals.entries()).toContainEqual(
+      expect.objectContaining({ key: "router:local-fallback", reason: "network:no-match" }),
+    );
+  });
+
+  it("never consults the local router when Jev answers", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    const root = skillTree();
+    jevExtension(host);
+
+    const fetchSpy = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          answers: {
+            best: {
+              type: "choice",
+              choice: "playwright-cli",
+              confidence: 0.9,
+              probabilities: { "playwright-cli": 0.9 },
+            },
+          },
+        }),
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    // Deliberately a prompt the local router would ALSO match strongly: a
+    // success that silently ran the fallback would look identical in the hint,
+    // which is exactly why the call count is asserted rather than the text.
+    await handlers.get("input")!(
+      { text: "use playwright to capture a screenshot of the login page" },
+      { cwd: root },
+    );
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(localRouteCalls).toEqual([]);
+
+    const startResult: any = await handlers.get("before_agent_start")!({}, { cwd: root });
+    expect(startResult.message.content).toContain("from the installed roster");
+    expect(startResult.message.content).not.toContain("local keyword match");
   });
 });

@@ -7,6 +7,7 @@
  */
 import { askJev, noul, choice, score } from "./client.js";
 import { THRESHOLDS } from "./patterns.js";
+import { scoreQuestions } from "./gate-core.js";
 import type { JevConfig } from "./types.js";
 
 const MAX_DIFF_CHARS = 8_000;
@@ -271,27 +272,25 @@ export async function dedupeItems(
   const selected = items.slice(0, MAX_ITEMS);
   const truncated = items.length > selected.length;
   if (selected.length === 0) return { unique: [], duplicateIndexes: [], truncated };
-  const questions: Record<string, { type: "noul"; instructions: string }> = {};
+  const instructions: Record<string, string> = {};
   for (let i = 1; i < selected.length; i++) {
-    questions[`d${i}`] = {
-      type: "noul",
-      instructions:
-        "This item conveys the same information as at least one EARLIER item in the list " +
-        "(a paraphrase or restatement counts as a duplicate).",
-    };
+    instructions[`d${i}`] =
+      "This item conveys the same information as at least one EARLIER item in the list " +
+      "(a paraphrase or restatement counts as a duplicate).";
   }
   // A single item can never be a duplicate of an earlier one; skip the call.
   if (selected.length === 1)
     return { unique: [{ index: 0, item: selected[0]! }], duplicateIndexes: [], truncated };
-  const response = await askJev(
+  const probabilities = await scoreQuestions(
     config,
     { items: selected.map((t, i) => ({ id: `d${i}`, text: t.slice(0, MAX_ITEM_CHARS) })) },
-    questions,
+    instructions,
     opts.signal,
+    "throw",
   );
   const duplicateIndexes: number[] = [];
   for (let i = 1; i < selected.length; i++) {
-    if (noul(response, `d${i}`) >= THRESHOLDS.duplicate) duplicateIndexes.push(i);
+    if ((probabilities[`d${i}`] ?? 0) >= THRESHOLDS.duplicate) duplicateIndexes.push(i);
   }
   const dupSet = new Set(duplicateIndexes);
   return {

@@ -17,6 +17,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { localRouteSkill } from "@jev-harness/core";
 import { lexicalShortlist } from "@jev-harness/kit";
 
 export interface RosterSkill {
@@ -272,6 +273,55 @@ export function shortlist(text: string, roster: readonly RosterSkill[]): RosterS
   }
   if (out.length > 0) return out;
   return roster.slice(0, MAX_CANDIDATES);
+}
+
+/**
+ * Degraded-path floor, on `localRouteSkill`'s own token-overlap scale
+ * (`hits / sqrt(|message| x |name+description|)`, 0..1).
+ *
+ * Core's `THRESHOLDS.localRouterFloor` (0.05) is a *plausibility* floor: one
+ * incidental shared word in a 12-word message against a 12-word description
+ * already scores 0.083 and clears it. A hook that prints the wrong skill name
+ * sends the model on a wasted detour, so this adapter asks for roughly two
+ * independent shared words instead: that same one-hit case scores 0.083 and is
+ * dropped, while "please automate the playwright browser flow now" against
+ * "playwright-cli - Drive a real browser with Playwright" shares `playwright`
+ * and `browser` over 7x7 tokens = 0.286 and is kept. Deliberately not
+ * `SKILL_MIN_CONFIDENCE`: that is a Jev probability, this is not.
+ */
+export const LOCAL_ROUTE_MIN_SCORE = 0.2;
+
+/** A local (non-Jev) match: the skill name plus its lexical-overlap score. */
+export interface LocalRoute {
+  skill: string;
+  score: number;
+}
+
+/**
+ * The degraded path: keyword overlap over the roster, used ONLY when the Jev
+ * routing call itself failed. Returns null unless the best match clears
+ * {@link LOCAL_ROUTE_MIN_SCORE}, so an outage with no clear match produces no
+ * hint at all rather than a guess.
+ */
+export function localRoute(text: string, roster: readonly RosterSkill[]): LocalRoute | null {
+  const best = localRouteSkill(text, [...roster]);
+  if (best.skill === null || best.score < LOCAL_ROUTE_MIN_SCORE) return null;
+  return { skill: best.skill, score: best.score };
+}
+
+/**
+ * One advisory line for a degraded match. Says `local` and prints the overlap
+ * score rather than reusing {@link skillHint}: that number is not a Jev
+ * probability and must not read as one.
+ */
+export function localRouteHint(route: LocalRoute): string {
+  return (
+    "[jev] Consider loading skill: " +
+    route.skill +
+    " (" +
+    Math.round(route.score * 100) +
+    "% local keyword match; Jev was unreachable)"
+  );
 }
 
 /** One advisory line: the skill, and how sure Jev was. */

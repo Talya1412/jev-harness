@@ -217,6 +217,47 @@ describe("dedupeItems", () => {
     expect(Object.keys(seen[0].questions)).toHaveLength(29);
     expect(r.truncated).toBe(true);
   });
+
+  it("returns an empty result for an empty input without calling Jev", async () => {
+    const { fetchImpl, seen } = jevStub({});
+    const r = await dedupeItems({ apiKey: "k", fetchImpl }, []);
+    expect(r).toEqual({ unique: [], duplicateIndexes: [], truncated: false });
+    expect(seen).toHaveLength(0);
+  });
+
+  it("asks one request with ids d1..dN — never d0 — and reads its own answer map", async () => {
+    const { fetchImpl, seen } = jevStub({ d1: n(0.9), d2: n(0.2), d3: n(0.5) });
+    const r = await dedupeItems({ apiKey: "k", fetchImpl }, ["a", "a again", "b", "b again"]);
+    expect(seen).toHaveLength(1);
+    expect(Object.keys(seen[0].questions)).toEqual(["d1", "d2", "d3"]);
+    expect(r.duplicateIndexes).toEqual([1, 3]);
+    expect(r.truncated).toBe(false);
+  });
+
+  it("truncates each item to 500 chars in state and keeps the id alongside it", async () => {
+    const { fetchImpl, seen } = jevStub({ d1: n(0.1) });
+    await dedupeItems({ apiKey: "k", fetchImpl }, ["x".repeat(900), "short"]);
+    expect(seen[0].state.items).toEqual([
+      { id: "d0", text: "x".repeat(500) },
+      { id: "d1", text: "short" },
+    ]);
+  });
+
+  it("rejects on a missing answer rather than silently keeping the item", async () => {
+    const { fetchImpl } = jevStub({ d1: n(0.9) });
+    await expect(dedupeItems({ apiKey: "k", fetchImpl }, ["a", "b", "c"])).rejects.toThrow(
+      /not a valid noul/,
+    );
+  });
+
+  it("rejects on an unparseable answer", async () => {
+    const { fetchImpl } = jevStub({
+      d1: { type: "noul", noul: "high" },
+    } as unknown as JevResponse["answers"]);
+    await expect(dedupeItems({ apiKey: "k", fetchImpl }, ["a", "b"])).rejects.toThrow(
+      /not a valid noul/,
+    );
+  });
 });
 
 describe("logSeverity", () => {

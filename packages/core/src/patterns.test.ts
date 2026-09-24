@@ -320,6 +320,52 @@ describe("gateInjection", () => {
     );
     expect(r.blocked).toBe(true);
   });
+
+  it("blocks exactly at the default threshold (0.7 is inclusive)", async () => {
+    const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.7 } });
+    const r = await gateInjection({ apiKey: "k", fetchImpl }, { source: "s", content: "c" });
+    expect(r.injection).toBe(0.7);
+    expect(r.blocked).toBe(true);
+  });
+
+  it("allows just below the default threshold", async () => {
+    const { fetchImpl } = jevStub({ injection: { type: "noul", noul: 0.6999 } });
+    const r = await gateInjection({ apiKey: "k", fetchImpl }, { source: "s", content: "c" });
+    expect(r.blocked).toBe(false);
+  });
+
+  it('issues exactly one request carrying question id "injection"', async () => {
+    const { fetchImpl, seen } = jevStub({ injection: { type: "noul", noul: 0.42 } });
+    await gateInjection({ apiKey: "k", fetchImpl }, { source: "webfetch", content: "c" });
+    expect(seen).toHaveLength(1);
+    expect(Object.keys(seen[0].questions)).toEqual(["injection"]);
+  });
+
+  it("truncates content to 8000 chars and forwards the source", async () => {
+    const { fetchImpl, seen } = jevStub({ injection: { type: "noul", noul: 0.1 } });
+    await gateInjection(
+      { apiKey: "k", fetchImpl },
+      { source: "webfetch", content: "c".repeat(9000) },
+    );
+    expect(seen[0].state.source).toBe("webfetch");
+    expect(seen[0].state.content).toHaveLength(8000);
+  });
+
+  it("rejects on a missing answer rather than guessing", async () => {
+    const { fetchImpl } = jevStub({});
+    await expect(
+      gateInjection({ apiKey: "k", fetchImpl }, { source: "s", content: "c" }),
+    ).rejects.toThrow(/not a valid noul/);
+  });
+
+  it("rejects on an unparseable answer", async () => {
+    const { fetchImpl } = jevStub({
+      injection: { type: "noul", noul: "high" },
+    } as unknown as JevResponse["answers"]);
+    await expect(
+      gateInjection({ apiKey: "k", fetchImpl }, { source: "s", content: "c" }),
+    ).rejects.toThrow(/not a valid noul/);
+  });
 });
 
 describe("verifyStep", () => {
@@ -393,6 +439,42 @@ describe("isDuplicate", () => {
     const r = await isDuplicate({ apiKey: "k", fetchImpl }, "item", []);
     expect(r).toEqual({ duplicates: [], any: false, scores: [] });
     expect(seen).toHaveLength(0);
+  });
+
+  it("scores a missing answer as 0 instead of dropping the candidate", async () => {
+    const { fetchImpl } = jevStub({ dup_0: { type: "noul", noul: 0.9 } });
+    const r = await isDuplicate({ apiKey: "k", fetchImpl }, "item", ["kept", "unanswered"]);
+    expect(r.scores).toEqual([
+      { candidate: "kept", probability: 0.9 },
+      { candidate: "unanswered", probability: 0 },
+    ]);
+    expect(r.duplicates).toEqual(["kept"]);
+  });
+
+  it("caps candidates at 64 by default and honours maxCandidates", async () => {
+    const { fetchImpl, seen } = jevStub({});
+    await isDuplicate(
+      { apiKey: "k", fetchImpl },
+      "item",
+      Array.from({ length: 70 }, (_, i) => `c${i}`),
+    );
+    expect(seen).toHaveLength(1);
+    expect(Object.keys(seen[0].questions)).toHaveLength(64);
+    expect(Object.keys(seen[0].questions)[63]).toBe("dup_63");
+
+    const { fetchImpl: f2, seen: s2 } = jevStub({});
+    await isDuplicate({ apiKey: "k", fetchImpl: f2 }, "item", ["a", "b", "c"], {
+      maxCandidates: 2,
+    });
+    expect(Object.keys(s2[0].questions)).toEqual(["dup_0", "dup_1"]);
+  });
+
+  it("truncates each candidate to 2000 chars in its own question", async () => {
+    const { fetchImpl, seen } = jevStub({ dup_0: { type: "noul", noul: 0.1 } });
+    await isDuplicate({ apiKey: "k", fetchImpl }, "i".repeat(5000), ["y".repeat(5000)]);
+    expect(String(seen[0].state.item)).toHaveLength(2000);
+    expect(String(seen[0].questions.dup_0.instructions)).toContain("y".repeat(2000));
+    expect(String(seen[0].questions.dup_0.instructions)).not.toContain("y".repeat(2001));
   });
 });
 

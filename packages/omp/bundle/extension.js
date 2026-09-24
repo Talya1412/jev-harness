@@ -282,7 +282,46 @@ var THRESHOLDS = Object.freeze({
   destructiveGate: 0.5,
   /** Minimum confidence before a skill suggestion is worth injecting. */
   skillRouting: 0.5,
+  /**
+   * Prompt-injection screen, ENTRY POINT A — `gateInjection`.
+   *
+   * `gateInjection` and `detectPromptInjection` are two entry points to ONE
+   * decision ("does this content try to manipulate the agent?"), now sharing
+   * one transport helper (in ./gate-core.js) and one question id. They stay
+   * separate because they screen at different moments and read different
+   * state:
+   *
+   * - `gateInjection` (this key, 0.7) runs on tool results and fetched pages
+   *   BEFORE they enter model context. It sees raw material the model has not
+   *   seen, and a false positive silently drops a legitimate result, so it
+   *   holds the stricter bar.
+   * - `detectPromptInjection` (0.6) runs on content about to be APPENDED to
+   *   an already-trusted conversation, where the blast radius of a miss is the
+   *   whole assembled context, so it screens lower — and its prompt also names
+   *   encoded payloads and role hijacking, which the pre-context screen's
+   *   wording does not.
+   *
+   * HONEST CAVEAT: the 0.1 GAP ITSELF IS NOT MEASURED. Unlike
+   * `destructiveGate` above, there is no injection golden dataset or recorded
+   * baseline in @jev-harness/eval — no sweep ever justified 0.7 over 0.6 or
+   * the reverse. The difference is justified by the entry points' differing
+   * jobs, not by a calibration run. Treat the gap as a deliberate, reversible
+   * choice, not a tuned constant: do not "tidy" the two keys into one without
+   * first recording an injection dataset and measuring the change. Each
+   * function reads its OWN key, and patterns-extra.test.ts pins that.
+   */
   gateInjection: 0.7,
+  /**
+   * Prompt-injection screen, ENTRY POINT B — `detectPromptInjection`.
+   *
+   * The counterpart to `gateInjection`; read that key's comment first. Same
+   * one decision, screened at a different point in the pipeline (content being
+   * appended to an already-trusted conversation) with wording that also names
+   * encoded payloads and role hijacking, hence the lower 0.6 bar.
+   *
+   * The 0.7-vs-0.6 gap is likewise UNMEASURED — see the caveat on
+   * `gateInjection`. Each function reads its own key on purpose.
+   */
   detectPromptInjection: 0.6,
   /** Dedup / same-underlying-fact cutoff. */
   duplicate: 0.5,
@@ -557,6 +596,32 @@ function createRefusalLedger(options = {}) {
       return entries.map((e) => Object.freeze({ ...e }));
     }
   };
+}
+var TOKEN_RE = /[a-z0-9]+/g;
+function tokenize(s) {
+  return new Set(s.toLowerCase().match(TOKEN_RE) ?? []);
+}
+function overlap(a, b) {
+  if (a.size === 0 || b.size === 0)
+    return 0;
+  let hit = 0;
+  for (const t of a)
+    if (b.has(t))
+      hit++;
+  return hit / Math.sqrt(a.size * b.size);
+}
+function localRouteSkill(message, skills) {
+  const m = tokenize(message);
+  let best = null;
+  for (const s of skills.slice(0, 50)) {
+    const desc = tokenize((s.name + " " + (s.description ?? "")).trim());
+    const sc = overlap(m, desc);
+    if (!best || sc > best.score)
+      best = { name: s.name, score: sc };
+  }
+  if (!best || best.score < THRESHOLDS.localRouterFloor)
+    return { skill: null, score: best?.score ?? 0 };
+  return { skill: best.name, score: best.score };
 }
 
 // ../core/dist/budget.js
@@ -1561,6 +1626,16 @@ function shortlist(text, roster) {
     return out;
   return roster.slice(0, MAX_CANDIDATES);
 }
+var LOCAL_ROUTE_MIN_SCORE = 0.2;
+function localRoute(text, roster) {
+  const best = localRouteSkill(text, [...roster]);
+  if (best.skill === null || best.score < LOCAL_ROUTE_MIN_SCORE)
+    return null;
+  return { skill: best.skill, score: best.score };
+}
+function localRouteHint(route) {
+  return "[jev] Consider loading skill: " + route.skill + " (" + Math.round(route.score * 100) + "% local keyword match; Jev was unreachable)";
+}
 function skillHint(answer) {
   if (!answer.skill)
     return null;
@@ -1718,11 +1793,13 @@ function jevExtension(pi) {
   pi.on("input", async (event, ctx) => {
     if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER") || sessionDisabled)
       return;
+    let text = "";
+    let roster = [];
     try {
-      const text = String(event?.text ?? event?.prompt ?? "");
+      text = String(event?.text ?? event?.prompt ?? "");
       if (text.length < MIN_PROMPT_CHARS)
         return;
-      const roster = loadSkillRoster(defaultSkillDirs(ctx?.cwd ?? process.cwd()));
+      roster = loadSkillRoster(defaultSkillDirs(ctx?.cwd ?? process.cwd()));
       if (roster.length === 0) {
         refusals.record("router:roster", "empty-roster");
         return;
@@ -1749,6 +1826,16 @@ function jevExtension(pi) {
       if (disabled)
         sessionDisabled = true;
       refusals.record("router:error", decision.kind);
+      const fallback = localRoute(text, roster);
+      refusals.record("router:local-fallback", fallback === null ? decision.kind + ":no-match" : decision.kind + ":" + fallback.skill);
+      if (fallback !== null) {
+        pi.logger.debug("jev_router: local fallback", {
+          skill: fallback.skill,
+          score: fallback.score,
+          failure: decision.kind
+        });
+        pendingHint = localRouteHint(fallback);
+      }
     }
   });
   pi.on("before_agent_start", async () => {
@@ -1825,5 +1912,6 @@ function jevExtension(pi) {
   });
 }
 export {
-  jevExtension as default
+  jevExtension as default,
+  refusals
 };

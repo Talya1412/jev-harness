@@ -278,7 +278,46 @@ var THRESHOLDS = Object.freeze({
   destructiveGate: 0.5,
   /** Minimum confidence before a skill suggestion is worth injecting. */
   skillRouting: 0.5,
+  /**
+   * Prompt-injection screen, ENTRY POINT A — `gateInjection`.
+   *
+   * `gateInjection` and `detectPromptInjection` are two entry points to ONE
+   * decision ("does this content try to manipulate the agent?"), now sharing
+   * one transport helper (in ./gate-core.js) and one question id. They stay
+   * separate because they screen at different moments and read different
+   * state:
+   *
+   * - `gateInjection` (this key, 0.7) runs on tool results and fetched pages
+   *   BEFORE they enter model context. It sees raw material the model has not
+   *   seen, and a false positive silently drops a legitimate result, so it
+   *   holds the stricter bar.
+   * - `detectPromptInjection` (0.6) runs on content about to be APPENDED to
+   *   an already-trusted conversation, where the blast radius of a miss is the
+   *   whole assembled context, so it screens lower — and its prompt also names
+   *   encoded payloads and role hijacking, which the pre-context screen's
+   *   wording does not.
+   *
+   * HONEST CAVEAT: the 0.1 GAP ITSELF IS NOT MEASURED. Unlike
+   * `destructiveGate` above, there is no injection golden dataset or recorded
+   * baseline in @jev-harness/eval — no sweep ever justified 0.7 over 0.6 or
+   * the reverse. The difference is justified by the entry points' differing
+   * jobs, not by a calibration run. Treat the gap as a deliberate, reversible
+   * choice, not a tuned constant: do not "tidy" the two keys into one without
+   * first recording an injection dataset and measuring the change. Each
+   * function reads its OWN key, and patterns-extra.test.ts pins that.
+   */
   gateInjection: 0.7,
+  /**
+   * Prompt-injection screen, ENTRY POINT B — `detectPromptInjection`.
+   *
+   * The counterpart to `gateInjection`; read that key's comment first. Same
+   * one decision, screened at a different point in the pipeline (content being
+   * appended to an already-trusted conversation) with wording that also names
+   * encoded payloads and role hijacking, hence the lower 0.6 bar.
+   *
+   * The 0.7-vs-0.6 gap is likewise UNMEASURED — see the caveat on
+   * `gateInjection`. Each function reads its own key on purpose.
+   */
   detectPromptInjection: 0.6,
   /** Dedup / same-underlying-fact cutoff. */
   duplicate: 0.5,
