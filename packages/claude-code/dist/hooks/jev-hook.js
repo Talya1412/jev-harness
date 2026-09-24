@@ -396,8 +396,8 @@ function resolveEnvConfig(opts = {}) {
 }
 
 // hooks/decisions.ts
-var DEFAULT_DESTRUCTIVE_THRESHOLD = 0.5;
-var DEFAULT_SKILL_CONFIDENCE = 0.5;
+var DEFAULT_DESTRUCTIVE_THRESHOLD = THRESHOLDS.destructiveGate;
+var DEFAULT_SKILL_CONFIDENCE = THRESHOLDS.skillRouting;
 var GATED_TOOLS = /* @__PURE__ */ new Set(["Bash", "Write", "Edit", "NotebookEdit"]);
 function parseNumber(raw, fallback) {
   if (raw === void 0 || raw.trim() === "") return fallback;

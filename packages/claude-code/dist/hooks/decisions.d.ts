@@ -6,9 +6,14 @@
  * how the skills config is parsed, and the exact payload shape — lives here so
  * it can be tested without spawning a process.
  */
-import type { SkillCandidate } from "@jev-harness/core";
-export declare const DEFAULT_DESTRUCTIVE_THRESHOLD = 0.5;
-export declare const DEFAULT_SKILL_CONFIDENCE = 0.5;
+import { type SkillCandidate } from "@jev-harness/core";
+/**
+ * Both cutoffs come from core's single tuned table rather than a local copy:
+ * a second literal here is exactly how this file once compared the wrong way
+ * round against core's default while every test still passed.
+ */
+export declare const DEFAULT_DESTRUCTIVE_THRESHOLD: 0.5;
+export declare const DEFAULT_SKILL_CONFIDENCE: 0.5;
 export declare const MIN_PROMPT_CHARS = 1;
 /**
  * Tools whose calls are worth judging. `hooks.json` matchers pre-filter to this

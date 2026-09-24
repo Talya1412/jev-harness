@@ -1,5 +1,19 @@
-export const DEFAULT_DESTRUCTIVE_THRESHOLD = 0.5;
-export const DEFAULT_SKILL_CONFIDENCE = 0.5;
+/**
+ * Pure decision helpers for the Claude Code hook.
+ *
+ * The hook entrypoint is an I/O shell: it reads stdin, calls Jev, writes a
+ * decision. Everything that decides *what* to write — which tools are gated,
+ * how the skills config is parsed, and the exact payload shape — lives here so
+ * it can be tested without spawning a process.
+ */
+import { THRESHOLDS } from "@jev-harness/core";
+/**
+ * Both cutoffs come from core's single tuned table rather than a local copy:
+ * a second literal here is exactly how this file once compared the wrong way
+ * round against core's default while every test still passed.
+ */
+export const DEFAULT_DESTRUCTIVE_THRESHOLD = THRESHOLDS.destructiveGate;
+export const DEFAULT_SKILL_CONFIDENCE = THRESHOLDS.skillRouting;
 export const MIN_PROMPT_CHARS = 1;
 /**
  * Tools whose calls are worth judging. `hooks.json` matchers pre-filter to this
