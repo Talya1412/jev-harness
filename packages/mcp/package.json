@@ -1,6 +1,6 @@
 {
   "name": "@jev-harness/mcp",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "MCP server (stdio) exposing TypeSafe's Jev (System One) decision model as tools.",
   "type": "module",
   "license": "Apache-2.0",
@@ -35,7 +35,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@jev-harness/core": "^0.7.0",
+    "@jev-harness/core": "^0.8.0",
     "@jev-harness/kit": "*",
     "@modelcontextprotocol/sdk": "^1.30.0"
   },
