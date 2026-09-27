@@ -1,5 +1,78 @@
 # @jev-harness/omp
 
+## 0.8.0
+
+### Minor Changes
+
+- [`01a78f2`](https://github.com/Talya1412/jev-harness/commit/01a78f2365c2e5420dc56a5d2c28fd6522df4fe4) Thanks [@Talya1412](https://github.com/Talya1412)! - Make the gate's confirmation protocol real.
+
+  The refusal message tells the model to re-issue the same call once the user has
+  confirmed it, but a `tool_call` event carries only `{ toolName, input }` — the
+  gate cannot see the conversation, so a restated confirmation was invisible to it
+  and the identical call blocked forever. That is a broken promise rather than a
+  safety property: it stranded the user who did exactly what they were told to do.
+
+  A blocked call is now remembered by digest, and the SAME call is allowed once
+  the user has spoken (the `input` hook is the clock). Any edit changes the digest,
+  so a modified call is judged afresh. The state lives on the extension instance
+  and resets on `session_start`/`session_switch`/`session_shutdown`, so an
+  exemption can never leak from one session into another — a first cut used
+  process-wide state, and the new session-boundary test caught it.
+
+### Patch Changes
+
+- [`0e8c6c4`](https://github.com/Talya1412/jev-harness/commit/0e8c6c473093f5a5bcd5846b4806312ae94edac5) Thanks [@Talya1412](https://github.com/Talya1412)! - Register the hooks once per host, so a stale copy cannot double-instrument it.
+
+  OMP loads every `.js`/`.ts` file in its extensions directory as an extension, and
+  a build copy left under a name that still ends in `.js` (for example
+  `jev-harness.js.bak-20260927`) counts. Five such backups from one afternoon meant
+  several stop gates armed in the same process, each able to refuse a settle, with
+  no way to unregister the stale ones without a restart — the gate looked "stuck"
+  for six turns and the cause was the file layout, not the logic.
+
+  The extension now instruments a host once; a second call is a silent no-op. This
+  is defence in depth: keeping backups out of the extensions directory is still the
+  operator's job, and the guard makes forgetting it harmless.
+
+- [`619b736`](https://github.com/Talya1412/jev-harness/commit/619b736046e70b15f3dd5da05dee39a9c0044859) Thanks [@Talya1412](https://github.com/Talya1412)! - Stop the verification gate from arming on a write that touches no file.
+
+  `write { path: "xd://report_issue" }` dispatches to a tool device (`write: { scope: "device" }` in OMP's own URL registry); it changes nothing on disk. The gate counted it as a changed file and refused a settle on a session with no edits at all — the exact false block that gets a gate removed, and it fired for real the first day the gate was enabled.
+
+  Edit detection now requires a target that is not a scheme URL, and a mixed
+  list keeps only the real paths.
+
+- [`9b51fc9`](https://github.com/Talya1412/jev-harness/commit/9b51fc92f37cd583685239750701f0c1451c4f98) Thanks [@Talya1412](https://github.com/Talya1412)! - Make the stop gate's documented escape actually work.
+
+  The refusal says "or state explicitly that no check applies to this change and
+  stop again" — but nothing implemented that, and the gate keeps no memory between
+  settles, so a session whose change cannot be verified (a tool-device dispatch, a
+  docs-only edit) was refused on every turn, forever. Same broken-promise class as
+  the tool_call gate fixed earlier.
+
+  A statement made AFTER the last edit that no check applies (docs-only,
+  nothing to test, no check is needed, ...) now clears the block. Recognition is
+  strict and position-checked, so a vague "done" still blocks, and one made before
+  the last edit does not count.
+
+- [`7b92b10`](https://github.com/Talya1412/jev-harness/commit/7b92b1001e3ee194297c6f06f37fcb7ef0eedd54) Thanks [@Talya1412](https://github.com/Talya1412)! - Teach the stop gate where checks actually run.
+
+  Almost nothing reaches the gate as a top-level `bash` call: this harness drives
+  shell steps from the code runners (`fabric_exec`, `eval`, `run_code`), so
+  `omp.bash({ cmd: "npm test" })` arrives as a `fabric_exec` call whose input is
+  JavaScript. Judging only the `bash` tool made every real check invisible, so a
+  session that ran the full suite before finishing was still refused with "nothing
+  has verified it since" — a false negative that fired for real on 2026-09-27.
+
+  The gate now also mines the call's own strings for quoted shell commands when the
+  tool is a code runner, and judges every command it finds, so one passing test is
+  not lost behind a later grep in the same call. Identifier text is not mistaken
+  for a command. Replayed against the real session (1,207 messages) it now finds 35
+  checks where it previously found none.
+
+- Updated dependencies []:
+  - @jev-harness/core@0.8.0
+  - @jev-harness/kit@0.8.0
+
 ## 0.7.0
 
 ### Minor Changes
