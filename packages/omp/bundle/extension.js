@@ -2216,12 +2216,53 @@ function collectStopEvidence(messages) {
   return {
     edits,
     checks,
-    mutationsAfterLastCheck: mutatingAt.filter((a) => a > lastCheckAt).length
+    mutationsAfterLastCheck: mutatingAt.filter((a) => a > lastCheckAt).length,
+    statedNoCheckApplies: statesNoCheckApplies(messages, edits)
   };
+}
+var NO_CHECK_PHRASES = [
+  /no check (?:applies|is needed|needed|required|applies here)/i,
+  /(?:nothing|no code) (?:to|needs?) (?:test|verify|check)/i,
+  /does not need (?:a |any )?(?:test|check|verification)/i,
+  /docs[- ]only|documentation[- ]only|comment[- ]only|formatting[- ]only/i,
+  /not applicable to (?:this|the) change/i,
+  /cannot be verified by (?:a )?(?:test|check)/i
+];
+function messageText(m) {
+  const parts = [];
+  if (typeof m.content === "string")
+    parts.push(m.content);
+  if (Array.isArray(m.content)) {
+    for (const b of m.content) {
+      const blk = asRecord(b);
+      if (blk.type === "text" && typeof blk.text === "string")
+        parts.push(blk.text);
+    }
+  }
+  return parts.join("\n");
+}
+function statesNoCheckApplies(messages, edits) {
+  if (edits.length === 0)
+    return false;
+  const lastEditAt = edits.reduce((n, e) => Math.max(n, e.at), -1);
+  let at = 0;
+  for (const raw of messages) {
+    const m = asRecord(raw);
+    if (at > lastEditAt) {
+      const text = messageText(m);
+      if (text !== "" && NO_CHECK_PHRASES.some((re) => re.test(text)))
+        return true;
+    }
+    at++;
+  }
+  return false;
 }
 function decideStop(evidence) {
   if (evidence.edits.length === 0)
     return { block: false, reason: "no-changes" };
+  if (evidence.statedNoCheckApplies === true) {
+    return { block: false, reason: "nothing-to-verify" };
+  }
   const lastEditAt = evidence.edits.reduce((n, e) => Math.max(n, e.at), -1);
   const lastPassed = evidence.checks.filter((c) => c.passed).reduce((best, c) => best === null || c.at > best.at ? c : best, null);
   if (lastPassed !== null && lastPassed.at > lastEditAt) {

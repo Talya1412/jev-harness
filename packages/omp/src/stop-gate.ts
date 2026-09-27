@@ -62,6 +62,11 @@ export interface StopGateEvidence {
   checks: StopGateCheck[];
   /** True when at least one mutating bash command ran after the last check. */
   mutationsAfterLastCheck: number;
+  /**
+   * Set when the transcript states after the last edit that no check applies.
+   * Optional so a caller that only has tool facts still compiles.
+   */
+  statedNoCheckApplies?: boolean;
 }
 
 const asRecord = (v: unknown): Record<string, unknown> =>
@@ -273,7 +278,63 @@ export function collectStopEvidence(messages: readonly unknown[]): StopGateEvide
     edits,
     checks,
     mutationsAfterLastCheck: mutatingAt.filter((a) => a > lastCheckAt).length,
+    statedNoCheckApplies: statesNoCheckApplies(messages, edits),
   };
+}
+
+/**
+ * The escape the refusal message promises, made real: "or state explicitly that
+ * no check applies to this change and stop again".
+ *
+ * The message offered a way forward the code did not implement, so a session
+ * with no verifiable change (a tool-device dispatch, a docs edit) was refused on
+ * every settle, forever — the same broken-promise class as the tool_call gate.
+ * Recognition is deliberately strict and only counts a statement made AFTER the
+ * last edit; anything vaguer keeps the block.
+ */
+const NO_CHECK_PHRASES = [
+  /no check (?:applies|is needed|needed|required|applies here)/i,
+  /(?:nothing|no code) (?:to|needs?) (?:test|verify|check)/i,
+  /does not need (?:a |any )?(?:test|check|verification)/i,
+  /docs[- ]only|documentation[- ]only|comment[- ]only|formatting[- ]only/i,
+  /not applicable to (?:this|the) change/i,
+  /cannot be verified by (?:a )?(?:test|check)/i,
+];
+
+/** Free text of a message, across the block spellings a transcript uses. */
+function messageText(m: Record<string, unknown>): string {
+  const parts: string[] = [];
+  if (typeof m.content === "string") parts.push(m.content);
+  if (Array.isArray(m.content)) {
+    for (const b of m.content as unknown[]) {
+      const blk = asRecord(b);
+      if (blk.type === "text" && typeof blk.text === "string") parts.push(blk.text);
+    }
+  }
+  return parts.join("\n");
+}
+
+/**
+ * True when the transcript states, in the model's own words after the last
+ * edit, that no check applies. Returned as a separate fact so the deterministic
+ * rule stays pure and the caller can decide how much to trust it.
+ */
+export function statesNoCheckApplies(
+  messages: readonly unknown[],
+  edits: readonly StopGateFileEdit[],
+): boolean {
+  if (edits.length === 0) return false;
+  const lastEditAt = edits.reduce((n, e) => Math.max(n, e.at), -1);
+  let at = 0;
+  for (const raw of messages) {
+    const m = asRecord(raw);
+    if (at > lastEditAt) {
+      const text = messageText(m);
+      if (text !== "" && NO_CHECK_PHRASES.some((re) => re.test(text))) return true;
+    }
+    at++;
+  }
+  return false;
 }
 
 export type StopGateVerdict =
@@ -286,6 +347,11 @@ export type StopGateVerdict =
  */
 export function decideStop(evidence: StopGateEvidence): StopGateVerdict {
   if (evidence.edits.length === 0) return { block: false, reason: "no-changes" };
+  // The documented escape: a plain statement that no check applies is a
+  // verification answer, not a loophole, and it must actually work.
+  if (evidence.statedNoCheckApplies === true) {
+    return { block: false, reason: "nothing-to-verify" };
+  }
   const lastEditAt = evidence.edits.reduce((n, e) => Math.max(n, e.at), -1);
   const lastPassed = evidence.checks
     .filter((c) => c.passed)

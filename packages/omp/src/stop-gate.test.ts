@@ -205,6 +205,57 @@ describe("collectStopEvidence", () => {
   });
 });
 
+describe("the promised escape: a stated no-check", () => {
+  const edited = () => [call("1", "write", { file_path: "docs/readme.md" }), result("1", "ok")];
+
+  it("does NOT block once the transcript states no check applies", () => {
+    const ev = collectStopEvidence([
+      ...edited(),
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "This is a docs-only change; no check applies." }],
+      },
+    ]);
+    expect(ev.statedNoCheckApplies).toBe(true);
+    expect(decideStop(ev).block).toBe(false);
+    if (!decideStop(ev).block) expect(decideStop(ev).reason).toBe("nothing-to-verify");
+  });
+
+  it("ignores such a statement made BEFORE the last edit", () => {
+    const ev = collectStopEvidence([
+      { role: "assistant", content: [{ type: "text", text: "no check applies here" }] },
+      ...edited(),
+    ]);
+    expect(ev.statedNoCheckApplies).toBe(false);
+    expect(decideStop(ev).block).toBe(true);
+  });
+
+  it("recognises the common phrasings, and nothing vaguer", () => {
+    const withText = (text: string) =>
+      collectStopEvidence([...edited(), { role: "assistant", content: [{ type: "text", text }] }]);
+    for (const good of [
+      "no check applies to this change",
+      "nothing to test here",
+      "this is docs-only",
+      "formatting-only edit",
+      "no check is needed",
+    ]) {
+      expect(withText(good).statedNoCheckApplies).toBe(true);
+    }
+    for (const vague of ["done", "I think it is fine", "tests would probably pass"]) {
+      expect(withText(vague).statedNoCheckApplies).toBe(false);
+    }
+  });
+
+  it("cannot fire when nothing was edited", () => {
+    const ev = collectStopEvidence([
+      { role: "assistant", content: [{ type: "text", text: "no check applies" }] },
+    ]);
+    expect(ev.statedNoCheckApplies).toBe(false);
+    expect(decideStop(ev).block).toBe(false); // no-changes
+  });
+});
+
 describe("decideStop", () => {
   const ev = (over: Partial<ReturnType<typeof collectStopEvidence>>) => ({
     edits: [],
