@@ -1,0 +1,241 @@
+/**
+ * Stop gate: refuse a "done" that has no verification behind it.
+ *
+ * Two invariants, both learned the hard way in this repo:
+ *  1. DETERMINISTIC FIRST — which edits happened and whether any check has
+ *     PASSED since is read from the session's own tool calls, no model needed.
+ *  2. A JUDGMENT MAY ONLY LOOSEN — Jev is asked once, only after the rule above
+ *     already says "block", and only so it can say the change needed no check
+ *     (docs-only, formatting). A probability can never invent a block; that is
+ *     the failure mode the old probabilistic gate was removed for.
+ *
+ * Pure: no ExtensionAPI, no network, so the predicate is testable alone.
+ */
+
+/** Names that mean "read or change a file", by the tool's own identity. */
+const EDIT_TOOLS = /^(?:write|edit|ast_edit|multiedit|notebookedit|apply_patch|patch)$/i;
+
+/** Commands that count as verification when they run and succeed. */
+const CHECK_PATTERN =
+  /(?:^|[\s&|;])(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|tests|lint|typecheck|check|build|qa|verify)\b|\b(?:npx|pnpx)\s+(?:vitest|jest|tsc|eslint|prettier|playwright)\b|\b(?:vitest|jest|pytest|tsc|eslint)\b|\bcargo\s+(?:test|check|clippy|build)\b|\bgo\s+(?:test|build|vet)\b|\b(?:pytest|ruff|mypy)\b|\bdotnet\s+(?:test|build)\b|\bmake\b|\bgradle\b|\bmvn\b/i;
+
+/** A bash command that mutates the workspace, as opposed to reading it. */
+const MUTATING_PATTERN =
+  /\b(?:rm|del|mv|move|cp|copy|mkdir|rmdir|touch|sed\s+-i|tee)\b|>{1,2}\s*\S|\bgit\s+(?:commit|push|reset|clean|checkout|restore|apply|merge|rebase|stash)\b|\bnpm\s+(?:install|i|publish|version)\b|\bpip\s+install\b/i;
+
+export interface StopGateFileEdit {
+  /** Tool that performed the edit. */
+  tool: string;
+  /** File path the tool was pointed at, when the arguments name one. */
+  path: string;
+  /** Index of the call in the flattened session, for ordering only. */
+  at: number;
+}
+
+export interface StopGateCheck {
+  /** The command that ran. */
+  command: string;
+  /** False when the result looked like an error. */
+  passed: boolean;
+  at: number;
+}
+
+export interface StopGateEvidence {
+  edits: StopGateFileEdit[];
+  checks: StopGateCheck[];
+  /** True when at least one mutating bash command ran after the last check. */
+  mutationsAfterLastCheck: number;
+}
+
+const asRecord = (v: unknown): Record<string, unknown> =>
+  v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+
+/** The text of a tool result body, across the spellings OMP and Anthropic use. */
+function resultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((x) => {
+        if (typeof x === "string") return x;
+        const r = asRecord(x);
+        return typeof r.text === "string" ? r.text : "";
+      })
+      .filter((s) => s !== "")
+      .join("\n");
+  }
+  if (content == null) return "";
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return "";
+  }
+}
+
+/** A result body is a failure when it says so, or when the host flagged it. */
+function looksFailed(body: string, flag: unknown): boolean {
+  if (flag === true) return true;
+  const head = body.slice(0, 400);
+  return (
+    /^\s*(?:error|Error|ERROR|failed|FAILED|Traceback|panic:)/.test(head) ||
+    /"is_error"\s*:\s*true/.test(head) ||
+    /\bexit(?:ed)?\s+(?:code\s+)?[1-9]/.test(head) ||
+    /\b[1-9]\d*\s+fail(?:ed|ures?)\b/i.test(head)
+  );
+}
+
+/** Every file path an edit tool was pointed at. */
+function pathsFromInput(input: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const key of ["file_path", "filePath", "path", "file", "target"]) {
+    const v = input[key];
+    if (typeof v === "string" && v !== "") out.push(v);
+  }
+  // ast_edit / patch style: a list of paths.
+  const list = input.paths ?? input.files;
+  if (Array.isArray(list)) for (const p of list) if (typeof p === "string") out.push(p);
+  return out;
+}
+
+/** Argument name that may carry a shell command, across providers. */
+function commandFromInput(input: Record<string, unknown>): string | null {
+  for (const key of ["cmd", "command", "script"]) {
+    const v = input[key];
+    if (typeof v === "string" && v !== "") return v;
+  }
+  return null;
+}
+
+/**
+ * Walk the session's messages in order and collect the only two facts the rule
+ * needs: which files were edited, and which checks passed.
+ *
+ * Three block spellings reach this function (Anthropic `tool_use` blocks, OMP
+ * `toolCall` blocks, and OMP's whole-message `role:"toolResult"`), and a result
+ * is paired by id so a check's exit status is attributed to the right call.
+ */
+export function collectStopEvidence(messages: readonly unknown[]): StopGateEvidence {
+  const edits: StopGateFileEdit[] = [];
+  const checks: StopGateCheck[] = [];
+  const mutatingAt: number[] = [];
+  const pending = new Map<
+    string,
+    { kind: "edit" | "check" | "mutate"; tool: string; path: string; command: string }
+  >();
+  let at = 0;
+
+  const recordCall = (id: string, tool: string, input: Record<string, unknown>) => {
+    if (EDIT_TOOLS.test(tool)) {
+      const paths = pathsFromInput(input);
+      edits.push({ tool, path: paths[0] ?? "", at });
+      pending.set(id, { kind: "edit", tool, path: paths[0] ?? "", command: "" });
+      return;
+    }
+    const command = commandFromInput(input);
+    if (command === null) return;
+    if (CHECK_PATTERN.test(command)) {
+      checks.push({ command, passed: true, at }); // flipped by the result below
+      pending.set(id, { kind: "check", tool, path: "", command });
+    } else if (MUTATING_PATTERN.test(command)) {
+      pending.set(id, { kind: "mutate", tool, path: "", command });
+      mutatingAt.push(at);
+    }
+  };
+
+  const recordResult = (id: string, body: string, flag: unknown) => {
+    const p = pending.get(id);
+    if (!p) return;
+    pending.delete(id);
+    if (p.kind !== "check") return;
+    // A check that FAILED does not count as verification. The last entry wins
+    // by position, so a later pass on the same command matters more.
+    const passed = !looksFailed(body, flag);
+    const last = checks[checks.length - 1];
+    if (last && last.command === p.command) last.passed = passed;
+  };
+
+  for (const raw of messages) {
+    const m = asRecord(raw);
+    const blocks = Array.isArray(m.content) ? (m.content as unknown[]) : [];
+    // A whole-message toolResult (OMP's spelling): pair by toolCallId.
+    const msgId = typeof m.toolCallId === "string" ? m.toolCallId : "";
+    if (msgId !== "") {
+      recordResult(msgId, resultText(m.content), asRecord(m).isError);
+      at++;
+      continue;
+    }
+    for (const b of blocks) {
+      const blk = asRecord(b);
+      const type = String(blk.type ?? "");
+      if (type === "tool_use" || type === "tool_call" || type === "toolCall") {
+        const id = String(blk.id ?? blk.toolCallId ?? "");
+        const tool = String(blk.name ?? blk.toolName ?? "tool");
+        recordCall(id, tool, asRecord(blk.input ?? blk.arguments ?? blk.args));
+      } else if (type === "tool_result" || type === "toolResult") {
+        const id = String(blk.tool_use_id ?? blk.toolUseId ?? blk.toolCallId ?? "");
+        recordResult(id, resultText(blk.content), blk.is_error ?? blk.isError);
+      }
+    }
+    at++;
+  }
+
+  const lastCheckAt = checks.filter((c) => c.passed).reduce((n, c) => Math.max(n, c.at), -1);
+  return {
+    edits,
+    checks,
+    mutationsAfterLastCheck: mutatingAt.filter((a) => a > lastCheckAt).length,
+  };
+}
+
+export type StopGateVerdict =
+  | { block: false; reason: "no-changes" | "verified" | "nothing-to-verify" }
+  | { block: true; reason: "unverified-edits"; files: string[]; lastCheck: string | null };
+
+/**
+ * The deterministic rule. Block ONLY when the session changed something and no
+ * check has passed since — the exact shape of "edited then claimed done".
+ */
+export function decideStop(evidence: StopGateEvidence): StopGateVerdict {
+  if (evidence.edits.length === 0) return { block: false, reason: "no-changes" };
+  const lastEditAt = evidence.edits.reduce((n, e) => Math.max(n, e.at), -1);
+  const lastPassed = evidence.checks
+    .filter((c) => c.passed)
+    .reduce<StopGateCheck | null>((best, c) => (best === null || c.at > best.at ? c : best), null);
+  if (lastPassed !== null && lastPassed.at > lastEditAt) {
+    return { block: false, reason: "verified" };
+  }
+  const files = [...new Set(evidence.edits.map((e) => e.path).filter((p) => p !== ""))];
+  return { block: true, reason: "unverified-edits", files, lastCheck: lastPassed?.command ?? null };
+}
+
+/**
+ * The message the model sees when it is refused. It names the files and the
+ * last thing that ran, so the next attempt can be specific instead of blind.
+ */
+export function stopGateReason(files: readonly string[], lastCheck: string | null): string {
+  const named = files.length > 0 ? files.slice(0, 5).join(", ") : "the workspace";
+  const tail =
+    lastCheck !== null
+      ? `The last check that passed was \`${lastCheck}\`, before the most recent change.`
+      : "No check has passed in this session.";
+  return (
+    `jev stop gate: ${named} changed, but nothing has verified it since. ${tail} ` +
+    "Run the project's checks (test, build, lint, or type-check) and fix what fails, " +
+    "or state explicitly that no check applies to this change and stop again."
+  );
+}
+
+/** The questions asked only to let a judgment LOOSEN a deterministic block. */
+export function verificationQuestions(
+  files: readonly string[],
+): Record<string, { type: "noul"; instructions: string }> {
+  return {
+    needs_check: {
+      type: "noul",
+      instructions:
+        "The change below is finished and needs no test, build, lint, or type-check to be trustworthy " +
+        "(for example documentation, comments, formatting-only edits, or a change to a file no code consumes). " +
+        "Answer yes only when running any check would be pointless: " +
+        (files.length > 0 ? files.slice(0, 5).join(", ") : "the changed files"),
+    },
+  };
+}

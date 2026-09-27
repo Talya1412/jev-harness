@@ -27,6 +27,10 @@
  * - 'before_agent_start': skill suggestion, delivered as a custom message.
  * - 'session_before_compact': verbatim compaction, fail-open.
  *   (the three above require 'OMP_JEV_AUTO=1', each with its own off-switch)
+ * - 'session_stop': verification gate — blocks a settle when something
+ *   changed and no check has passed since (deterministic rule first; one Jev
+ *   question may only LOOSEN it). Requires 'OMP_JEV_AUTO=1' plus
+ *   'OMP_JEV_STOP=1', because a blocking hook is opt-in by default.
  * - 'tool_result': bulky-result pruning — behind its OWN switch
  *   'OMP_JEV_PRUNE=1', deliberately NOT the master switch (every rewrite
  *   invalidates the provider prompt-cache prefix from that point, so it is
@@ -39,6 +43,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
+  askJev,
   chooseBrowserAction,
   createBudgetGuard,
   createDecisionLog,
@@ -46,17 +51,22 @@ import {
   decisionDigest,
   judgeDestructiveDual,
   jsonlSink,
+  noul,
   pickTool,
   routeSkill,
+  summarizeSavings,
+  formatSavings,
   withPersistentCache,
   type JevConfig,
 } from "@jev-harness/core";
 import {
   GATE_DEADLINE_MS,
   GATE_THRESHOLD,
+  STOP_EXEMPT_THRESHOLD,
   SKILL_MIN_CONFIDENCE,
   autoOn,
   envNum,
+  optIn,
   readConfig,
   redactOn,
   withDeadline,
@@ -75,6 +85,12 @@ import {
   type RosterSkill,
 } from "./router.js";
 import { classifyBashReadOnly } from "./gate-prefilter.js";
+import {
+  collectStopEvidence,
+  decideStop,
+  stopGateReason,
+  verificationQuestions,
+} from "./stop-gate.js";
 import { pruneToolResult } from "./prune.js";
 
 /** `process.env` bound once, so the pure helpers stay testable. */
@@ -161,7 +177,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
     approval: "read",
     parameters: z.object({
       mode: z
-        .enum(["route_skills", "browse_action", "pick_tool"])
+        .enum(["route_skills", "browse_action", "pick_tool", "savings"])
         .describe("Which judgment to make."),
       task: z
         .string()
@@ -234,6 +250,16 @@ export default function jevExtension(pi: ExtensionAPI): void {
       const cfg = jevConfig(undefined, redactOn(ENV, "tool"));
       const text = (value: unknown) => JSON.stringify(value, null, 2);
 
+      if (params.mode === "savings") {
+        // Reads the adapter's own decision ring (and whatever the JSONL sink
+        // has already recorded for this session); it never calls Jev.
+        const summary = summarizeSavings(gateLog.entries());
+        const text = formatSavings(summary);
+        return {
+          content: [{ type: "text", text }],
+          details: summary,
+        };
+      }
       if (params.mode === "route_skills") {
         const candidates = (params.skills ?? []) as Array<{ name: string; description?: string }>;
         const result = await routeSkill(cfg, String(params.task ?? ""), candidates, {
@@ -397,6 +423,60 @@ export default function jevExtension(pi: ExtensionAPI): void {
       if (disabled) sessionDisabled = true;
       refusals.record("gate:error", decision.kind);
       return; // allow
+    }
+  });
+
+  // Gate 2 — stop gate: refuse a "done" that nothing verified.
+  //
+  // `session_stop` fires when the main turn is about to settle, and a handler
+  // may return { decision: "block" } to request one continuation turn (the host
+  // caps them, so this cannot loop forever). The rule is DETERMINISTIC first:
+  // the session's own tool calls say whether anything changed and whether a
+  // check has PASSED since the last change. Only after that rule already
+  // decides "block" is Jev asked one question, and its answer may only LOOSEN
+  // the verdict (a docs-only change needs no build). A probability can never
+  // invent a block — that direction is how the old gate blocked coherent work.
+  pi.on("session_stop", async (event: any, ctx: any) => {
+    if (!optIn(ENV, "OMP_JEV_STOP") || sessionDisabled) return;
+    try {
+      const evidence = collectStopEvidence(event?.messages ?? []);
+      const verdict = decideStop(evidence);
+      if (!verdict.block) return;
+
+      // The one advisory call: does this change actually need a check?
+      // Fail-open by construction — an error skips the question and keeps the
+      // deterministic block, which is the strict-but-correct direction here
+      // because the block already has evidence behind it.
+      let exempt = false;
+      try {
+        const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
+        const response = await askJev(
+          cfg,
+          { changed_files: verdict.files, last_check: verdict.lastCheck },
+          verificationQuestions(verdict.files),
+          withDeadline(ctx?.signal, GATE_DEADLINE_MS),
+        );
+        exempt = noul(response, "needs_check") >= STOP_EXEMPT_THRESHOLD;
+      } catch (err) {
+        const decision = decideOnFailure(err, "stop");
+        reportFailure(pi.logger, decision);
+      }
+      if (exempt) {
+        refusals.record("stop:exempt", "no-check-needed");
+        return;
+      }
+
+      refusals.record("stop", "unverified-edits");
+      return {
+        decision: "block" as const,
+        reason: stopGateReason(verdict.files, verdict.lastCheck),
+        additionalContext: stopGateReason(verdict.files, verdict.lastCheck),
+      };
+    } catch (err) {
+      // A stop gate that throws would strand the session; allow the settle.
+      const decision = decideOnFailure(err, "stop");
+      reportFailure(pi.logger, decision);
+      return;
     }
   });
 

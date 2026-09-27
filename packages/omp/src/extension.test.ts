@@ -25,7 +25,13 @@ vi.mock("../src/router.js", async (importOriginal) => {
 
 /** The shipped surface: ONE advisory tool + the three auto hooks. */
 const TOOL_NAMES = ["jev"];
-const HOOK_NAMES = ["tool_call", "input", "before_agent_start", "session_before_compact"];
+const HOOK_NAMES = [
+  "tool_call",
+  "input",
+  "before_agent_start",
+  "session_before_compact",
+  "session_stop",
+];
 
 /** Minimal pi host: captures tool + hook registrations for observable assertions. */
 function makeHost() {
@@ -64,6 +70,7 @@ const ENV_KEYS = [
   "OMP_JEV_GATE",
   "OMP_JEV_SKILL_ROUTER",
   "OMP_JEV_CONTEXT",
+  "OMP_JEV_STOP",
 ];
 
 const savedEnv = new Map<string, string | undefined>();
@@ -198,6 +205,146 @@ describe("jev tool modes", () => {
     });
     expect(out.details.confirm_required).toBe(true);
     expect(out.details.tool).toBe("bash");
+  });
+});
+
+describe("savings mode", () => {
+  it("reports skips vs judged from the gate's own log, with no request", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, tools, handlers } = makeHost();
+    jevExtension(host);
+
+    const fetchMock = vi.fn(async () => gateBody(0.05, "read-only", 0.9));
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Two read-only commands (skipped) and one write (judged).
+    await handlers.get("tool_call")!({ toolName: "bash", input: { cmd: "ls -la" } });
+    await handlers.get("tool_call")!({ toolName: "bash", input: { cmd: "cat a.txt" } });
+    await handlers.get("tool_call")!({ toolName: "bash", input: { cmd: "rm -rf build" } });
+    const callsBefore = fetchMock.mock.calls.length;
+
+    const out = await tools.get("jev")!.execute("id-savings", { mode: "savings" });
+    // The report itself must not spend a request.
+    expect(fetchMock.mock.calls.length).toBe(callsBefore);
+    expect(out.details.decisions).toBe(3);
+    expect(out.details.skipped["read-command:ls"]).toBe(1);
+    expect(out.details.skipped["read-command:cat"]).toBe(1);
+    expect(out.content[0].text).toContain("MEASURED");
+    expect(out.content[0].text).toContain("ESTIMATED");
+  });
+});
+
+describe("stop gate", () => {
+  const editThenNothing = [
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "1", name: "write", arguments: { file_path: "a.ts" } }],
+    },
+    {
+      role: "toolResult",
+      toolCallId: "1",
+      isError: false,
+      content: [{ type: "text", text: "ok" }],
+    },
+  ];
+  const editThenTest = [
+    ...editThenNothing,
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "2", name: "bash", arguments: { cmd: "npm test" } }],
+    },
+    {
+      role: "toolResult",
+      toolCallId: "2",
+      isError: false,
+      content: [{ type: "text", text: "12 passed" }],
+    },
+  ];
+
+  it("is OFF unless explicitly opted in, even with the master switch on", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+
+    const fetchMock = vi.fn(async () => gateBody(0.9, "read-only", 0.9));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await handlers.get("session_stop")!({ messages: editThenNothing });
+    // Not opted in: the deterministic block is not even evaluated, and no call is made.
+    expect(out).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("BLOCKS a settle when an edit has no check after it", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1", OMP_JEV_STOP: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+
+    // The one judgment says the change does NOT need a check (probability 0),
+    // so the deterministic block stands.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ answers: { needs_check: { type: "noul", noul: 0.1 } } }),
+      })),
+    );
+
+    const out: any = await handlers.get("session_stop")!({ messages: editThenNothing });
+    expect(out.decision).toBe("block");
+    expect(out.reason).toContain("a.ts");
+    expect(out.reason).toContain("no check applies");
+  });
+
+  it("LETS a verified settle through without spending a request", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1", OMP_JEV_STOP: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+
+    const fetchMock = vi.fn(async () => gateBody(0.9, "read-only", 0.9));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await handlers.get("session_stop")!({ messages: editThenTest });
+    expect(out).toBeUndefined();
+    // The deterministic rule already says "verified"; no judgment is needed.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("LOOSENS the block when Jev says no check applies", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1", OMP_JEV_STOP: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({ answers: { needs_check: { type: "noul", noul: 0.95 } } }),
+      })),
+    );
+
+    const out = await handlers.get("session_stop")!({ messages: editThenNothing });
+    expect(out).toBeUndefined();
+  });
+
+  it("keeps the deterministic block when the judgment call fails", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1", OMP_JEV_STOP: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+
+    const out: any = await handlers.get("session_stop")!({ messages: editThenNothing });
+    // A failed exemption call must not silently grant the settle.
+    expect(out.decision).toBe("block");
   });
 });
 

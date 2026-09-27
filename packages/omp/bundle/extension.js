@@ -1224,6 +1224,58 @@ async function pruneContext(config, items, options) {
   return { decisions, deferred: false };
 }
 
+// ../core/dist/savings.js
+var DEFAULT_INPUT_USD_PER_MTOK = 0.042;
+var round = (n, places = 6) => Number(n.toFixed(places));
+function summarizeSavings(records, opts = {}) {
+  const price = opts.usdPerMTok ?? DEFAULT_INPUT_USD_PER_MTOK;
+  const skipped = {};
+  const judged = {};
+  let judgedLatencyMs = 0;
+  let blocked = 0;
+  let judgedCount = 0;
+  for (const r of records) {
+    const action = String(r.action ?? "unknown");
+    if (action.startsWith("skip:")) {
+      const rule = action.slice("skip:".length) || "unknown";
+      skipped[rule] = (skipped[rule] ?? 0) + 1;
+      continue;
+    }
+    judged[action] = (judged[action] ?? 0) + 1;
+    judgedCount++;
+    judgedLatencyMs += Number.isFinite(r.latencyMs) ? r.latencyMs : 0;
+    if (action === "block" || action === "confirm")
+      blocked++;
+  }
+  const meanJudgedTokens = Math.max(0, opts.meanJudgedTokens ?? 0);
+  const skipCount = Object.values(skipped).reduce((a, b) => a + b, 0);
+  const meanJudgedMs = judgedCount > 0 ? judgedLatencyMs / judgedCount : 0;
+  return {
+    decisions: records.length,
+    skipped,
+    judged,
+    judgedLatencyMs,
+    blocked,
+    meanJudgedTokens,
+    // Nine places: per-call costs are micro-dollars, so a coarser rounding
+    // would erase the very difference the figure exists to show.
+    estimatedUsdAvoided: round(skipCount * meanJudgedTokens * price / 1e6, 9),
+    estimatedMsAvoided: Math.round(skipCount * meanJudgedMs)
+  };
+}
+function formatSavings(s) {
+  const lines = [
+    `decisions          ${s.decisions}`,
+    `judged (MEASURED)  ${Object.values(s.judged).reduce((a, b) => a + b, 0)}  latency ${s.judgedLatencyMs} ms, blocked ${s.blocked}`,
+    `skipped (no call)  ${Object.values(s.skipped).reduce((a, b) => a + b, 0)}`
+  ];
+  for (const [rule, n] of Object.entries(s.skipped).sort((a, b) => b[1] - a[1])) {
+    lines.push(`  ${rule.padEnd(24)} ${n}`);
+  }
+  lines.push(`avoided (ESTIMATED from ${s.meanJudgedTokens} tok/call)  $${s.estimatedUsdAvoided}  ~${s.estimatedMsAvoided} ms`);
+  return lines.join("\n");
+}
+
 // ../kit/dist/config.js
 var MAX_TIMEOUT_MS = 2147483647;
 function parseTimeoutMs(raw) {
@@ -1277,6 +1329,7 @@ function lexicalShortlist(text, roster, opts = {}) {
 // dist/config.js
 var DEFAULT_TIMEOUT_MS2 = 15e3;
 var GATE_THRESHOLD = THRESHOLDS.destructiveGate;
+var STOP_EXEMPT_THRESHOLD = 0.7;
 var SKILL_MIN_CONFIDENCE = THRESHOLDS.skillRouting;
 var GATE_DEADLINE_MS = 8e3;
 function withDeadline(host, ms) {
@@ -1326,6 +1379,9 @@ function envNum(env, name, fallback) {
     return fallback;
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
+}
+function optIn(env, name) {
+  return (env[name] ?? "").trim() === "1";
 }
 
 // dist/compact.js
@@ -1673,10 +1729,23 @@ function readSkillDir(root) {
 }
 function defaultSkillDirs(cwd, home) {
   const resolved = home ?? process.env.HOME ?? process.env.USERPROFILE ?? homedir();
+  const projectDir = cwd;
   return [
-    join2(cwd, ".omp", "skills"),
+    // Native OMP: project, then the active profile's agent dir.
+    join2(projectDir, ".omp", "skills"),
     join2(resolved, ".omp", "agent", "skills"),
-    join2(resolved, ".agents", "skills")
+    // Vendor-neutral agent dirs, project before user (OMP scans .agent/.agents).
+    join2(projectDir, ".agent", "skills"),
+    join2(projectDir, ".agents", "skills"),
+    join2(resolved, ".agent", "skills"),
+    join2(resolved, ".agents", "skills"),
+    // Other hosts whose trees OMP loads into the same roster.
+    join2(projectDir, ".claude", "skills"),
+    join2(resolved, ".claude", "skills"),
+    join2(projectDir, ".codex", "skills"),
+    join2(resolved, ".codex", "skills"),
+    join2(projectDir, ".opencode", "skills"),
+    join2(resolved, ".config", "opencode", "skills")
   ];
 }
 function loadSkillRoster(dirs) {
@@ -1973,6 +2042,150 @@ function classifyBashReadOnly(command) {
   return rules.length > 0 ? rules.join("+") : null;
 }
 
+// dist/stop-gate.js
+var EDIT_TOOLS = /^(?:write|edit|ast_edit|multiedit|notebookedit|apply_patch|patch)$/i;
+var CHECK_PATTERN = /(?:^|[\s&|;])(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|tests|lint|typecheck|check|build|qa|verify)\b|\b(?:npx|pnpx)\s+(?:vitest|jest|tsc|eslint|prettier|playwright)\b|\b(?:vitest|jest|pytest|tsc|eslint)\b|\bcargo\s+(?:test|check|clippy|build)\b|\bgo\s+(?:test|build|vet)\b|\b(?:pytest|ruff|mypy)\b|\bdotnet\s+(?:test|build)\b|\bmake\b|\bgradle\b|\bmvn\b/i;
+var MUTATING_PATTERN = /\b(?:rm|del|mv|move|cp|copy|mkdir|rmdir|touch|sed\s+-i|tee)\b|>{1,2}\s*\S|\bgit\s+(?:commit|push|reset|clean|checkout|restore|apply|merge|rebase|stash)\b|\bnpm\s+(?:install|i|publish|version)\b|\bpip\s+install\b/i;
+var asRecord = (v) => v && typeof v === "object" ? v : {};
+function resultText(content) {
+  if (typeof content === "string")
+    return content;
+  if (Array.isArray(content)) {
+    return content.map((x) => {
+      if (typeof x === "string")
+        return x;
+      const r = asRecord(x);
+      return typeof r.text === "string" ? r.text : "";
+    }).filter((s) => s !== "").join("\n");
+  }
+  if (content == null)
+    return "";
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return "";
+  }
+}
+function looksFailed(body, flag) {
+  if (flag === true)
+    return true;
+  const head = body.slice(0, 400);
+  return /^\s*(?:error|Error|ERROR|failed|FAILED|Traceback|panic:)/.test(head) || /"is_error"\s*:\s*true/.test(head) || /\bexit(?:ed)?\s+(?:code\s+)?[1-9]/.test(head) || /\b[1-9]\d*\s+fail(?:ed|ures?)\b/i.test(head);
+}
+function pathsFromInput(input) {
+  const out = [];
+  for (const key of ["file_path", "filePath", "path", "file", "target"]) {
+    const v = input[key];
+    if (typeof v === "string" && v !== "")
+      out.push(v);
+  }
+  const list = input.paths ?? input.files;
+  if (Array.isArray(list)) {
+    for (const p of list)
+      if (typeof p === "string")
+        out.push(p);
+  }
+  return out;
+}
+function commandFromInput(input) {
+  for (const key of ["cmd", "command", "script"]) {
+    const v = input[key];
+    if (typeof v === "string" && v !== "")
+      return v;
+  }
+  return null;
+}
+function collectStopEvidence(messages) {
+  const edits = [];
+  const checks = [];
+  const mutatingAt = [];
+  const pending = /* @__PURE__ */ new Map();
+  let at = 0;
+  const recordCall = (id, tool, input) => {
+    if (EDIT_TOOLS.test(tool)) {
+      const paths = pathsFromInput(input);
+      edits.push({ tool, path: paths[0] ?? "", at });
+      pending.set(id, { kind: "edit", tool, path: paths[0] ?? "", command: "" });
+      return;
+    }
+    const command = commandFromInput(input);
+    if (command === null)
+      return;
+    if (CHECK_PATTERN.test(command)) {
+      checks.push({ command, passed: true, at });
+      pending.set(id, { kind: "check", tool, path: "", command });
+    } else if (MUTATING_PATTERN.test(command)) {
+      pending.set(id, { kind: "mutate", tool, path: "", command });
+      mutatingAt.push(at);
+    }
+  };
+  const recordResult = (id, body, flag) => {
+    const p = pending.get(id);
+    if (!p)
+      return;
+    pending.delete(id);
+    if (p.kind !== "check")
+      return;
+    const passed = !looksFailed(body, flag);
+    const last = checks[checks.length - 1];
+    if (last && last.command === p.command)
+      last.passed = passed;
+  };
+  for (const raw of messages) {
+    const m = asRecord(raw);
+    const blocks = Array.isArray(m.content) ? m.content : [];
+    const msgId = typeof m.toolCallId === "string" ? m.toolCallId : "";
+    if (msgId !== "") {
+      recordResult(msgId, resultText(m.content), asRecord(m).isError);
+      at++;
+      continue;
+    }
+    for (const b of blocks) {
+      const blk = asRecord(b);
+      const type = String(blk.type ?? "");
+      if (type === "tool_use" || type === "tool_call" || type === "toolCall") {
+        const id = String(blk.id ?? blk.toolCallId ?? "");
+        const tool = String(blk.name ?? blk.toolName ?? "tool");
+        recordCall(id, tool, asRecord(blk.input ?? blk.arguments ?? blk.args));
+      } else if (type === "tool_result" || type === "toolResult") {
+        const id = String(blk.tool_use_id ?? blk.toolUseId ?? blk.toolCallId ?? "");
+        recordResult(id, resultText(blk.content), blk.is_error ?? blk.isError);
+      }
+    }
+    at++;
+  }
+  const lastCheckAt = checks.filter((c) => c.passed).reduce((n, c) => Math.max(n, c.at), -1);
+  return {
+    edits,
+    checks,
+    mutationsAfterLastCheck: mutatingAt.filter((a) => a > lastCheckAt).length
+  };
+}
+function decideStop(evidence) {
+  if (evidence.edits.length === 0)
+    return { block: false, reason: "no-changes" };
+  const lastEditAt = evidence.edits.reduce((n, e) => Math.max(n, e.at), -1);
+  const lastPassed = evidence.checks.filter((c) => c.passed).reduce((best, c) => best === null || c.at > best.at ? c : best, null);
+  if (lastPassed !== null && lastPassed.at > lastEditAt) {
+    return { block: false, reason: "verified" };
+  }
+  const files = [...new Set(evidence.edits.map((e) => e.path).filter((p) => p !== ""))];
+  return { block: true, reason: "unverified-edits", files, lastCheck: lastPassed?.command ?? null };
+}
+function stopGateReason(files, lastCheck) {
+  const named = files.length > 0 ? files.slice(0, 5).join(", ") : "the workspace";
+  const tail = lastCheck !== null ? `The last check that passed was \`${lastCheck}\`, before the most recent change.` : "No check has passed in this session.";
+  return `jev stop gate: ${named} changed, but nothing has verified it since. ${tail} Run the project's checks (test, build, lint, or type-check) and fix what fails, or state explicitly that no check applies to this change and stop again.`;
+}
+function verificationQuestions(files) {
+  return {
+    needs_check: {
+      type: "noul",
+      instructions: "The change below is finished and needs no test, build, lint, or type-check to be trustworthy (for example documentation, comments, formatting-only edits, or a change to a file no code consumes). Answer yes only when running any check would be pointless: " + (files.length > 0 ? files.slice(0, 5).join(", ") : "the changed files")
+    }
+  };
+}
+
 // dist/prune.js
 var PRUNE_MARKER = "omitted by jev prune";
 var PRUNE_HARD_CAP_CHARS = 2e5;
@@ -2056,7 +2269,7 @@ function jevExtension(pi) {
     loadMode: "discoverable",
     approval: "read",
     parameters: z.object({
-      mode: z.enum(["route_skills", "browse_action", "pick_tool"]).describe("Which judgment to make."),
+      mode: z.enum(["route_skills", "browse_action", "pick_tool", "savings"]).describe("Which judgment to make."),
       task: z.string().optional().describe("route_skills / pick_tool: the task, request, or question to judge."),
       skills: z.array(z.object({ name: z.string(), description: z.string().optional() })).optional().describe("route_skills: candidate skills to rank. Descriptions matter \u2014 without them a browser task routes to a desktop-automation skill."),
       tools: z.array(z.object({
@@ -2084,6 +2297,14 @@ function jevExtension(pi) {
       const abort = signal ?? void 0;
       const cfg = jevConfig(void 0, redactOn(ENV, "tool"));
       const text = (value) => JSON.stringify(value, null, 2);
+      if (params.mode === "savings") {
+        const summary = summarizeSavings(gateLog.entries());
+        const text2 = formatSavings(summary);
+        return {
+          content: [{ type: "text", text: text2 }],
+          details: summary
+        };
+      }
       if (params.mode === "route_skills") {
         const candidates = params.skills ?? [];
         const result2 = await routeSkill(cfg, String(params.task ?? ""), candidates, {
@@ -2183,6 +2404,39 @@ function jevExtension(pi) {
       if (disabled)
         sessionDisabled = true;
       refusals.record("gate:error", decision.kind);
+      return;
+    }
+  });
+  pi.on("session_stop", async (event, ctx) => {
+    if (!optIn(ENV, "OMP_JEV_STOP") || sessionDisabled)
+      return;
+    try {
+      const evidence = collectStopEvidence(event?.messages ?? []);
+      const verdict = decideStop(evidence);
+      if (!verdict.block)
+        return;
+      let exempt = false;
+      try {
+        const cfg = jevConfig(void 0, redactOn(ENV, "hook"));
+        const response = await askJev(cfg, { changed_files: verdict.files, last_check: verdict.lastCheck }, verificationQuestions(verdict.files), withDeadline(ctx?.signal, GATE_DEADLINE_MS));
+        exempt = noul(response, "needs_check") >= STOP_EXEMPT_THRESHOLD;
+      } catch (err) {
+        const decision = decideOnFailure(err, "stop");
+        reportFailure(pi.logger, decision);
+      }
+      if (exempt) {
+        refusals.record("stop:exempt", "no-check-needed");
+        return;
+      }
+      refusals.record("stop", "unverified-edits");
+      return {
+        decision: "block",
+        reason: stopGateReason(verdict.files, verdict.lastCheck),
+        additionalContext: stopGateReason(verdict.files, verdict.lastCheck)
+      };
+    } catch (err) {
+      const decision = decideOnFailure(err, "stop");
+      reportFailure(pi.logger, decision);
       return;
     }
   });

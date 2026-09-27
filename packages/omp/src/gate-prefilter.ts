@@ -1,26 +1,19 @@
 /**
- * Gate pre-filter: a strict, closed-form allowlist that decides when a
- * `tool_call` needs NO Jev judgment at all.
+ * Gate pre-filter: a strict, closed-form allowlist for `tool_call` skips.
  *
- * Why this exists: the gate used to filter on the tool NAME only
- * (`/^(bash|write|edit|delete|move|rm|mcp__)/i`), so every `bash` call — `ls`,
- * `cat`, `grep`, `gh api`, every read — spent a Jev round trip. Measured on
- * this machine's own cache, 512 judged calls yielded exactly 3 destructive
- * verdicts, the rest being read-only/reversible work a closed-form rule can
- * recognise for free.
+ * The gate filtered on the tool NAME only, so every `bash` call spent a Jev
+ * round trip; measured on this machine's cache, 512 judged calls produced 3
+ * destructive verdicts and 94% that could never be blocked.
  *
- * The contract is deliberately asymmetric:
- * - a match means "do not spend a request", NEVER "approve". This module has no
- *   authority to allow anything; a skip returns the same `undefined` the gate
- *   returns for a tool it does not adjudicate.
- * - anything unrecognised, ambiguous, or even arguably mutating falls through
- *   to Jev. The allowlist must be RIGHT or silent, never merely useful: a false
- *   `mutating` costs one request, a false `read-only` would grant silent
+ * The contract is asymmetric on purpose:
+ * - a match means "do not spend", NEVER "approve" — a skip returns the same
+ *   `undefined` the gate already returns for a tool it does not adjudicate.
+ * - anything unrecognised, ambiguous, or arguably mutating reaches Jev. A
+ *   false `mutating` costs one request; a false `read-only` grants silent
  *   permission, so every uncertainty resolves toward the call.
- * - a loose "looks benign" list was measured at ~21% disagreement in both
- *   directions (a `node script.js` read as read-only, a redirect hidden behind
- *   a pipe, `cmd /c ... del` invisible). That is why this is an allowlist of
- *   exact shapes and never a classifier.
+ * - a loose "looks benign" list was measured at ~21% error in BOTH directions
+ *   (`node script.js` read as read-only, a redirect behind a pipe, `cmd /c del`
+ *   invisible). Hence an allowlist of exact shapes, never a classifier.
  */
 
 /**

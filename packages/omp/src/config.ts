@@ -18,6 +18,14 @@ export const DEFAULT_TIMEOUT_MS = 15_000;
  */
 export const GATE_THRESHOLD = THRESHOLDS.destructiveGate;
 
+/**
+ * Stop gate: how sure Jev must be that a change needs NO check before the
+ * deterministic block is lifted. Deliberately high and deliberately the only
+ * direction a judgment may move the verdict — a wrong exemption costs a missed
+ * check, while a wrong block would fight the user's own workflow.
+ */
+export const STOP_EXEMPT_THRESHOLD = 0.7;
+
 /** Minimum confidence before the skill router injects a suggestion. */
 export const SKILL_MIN_CONFIDENCE = THRESHOLDS.skillRouting;
 
@@ -109,4 +117,14 @@ export function envNum(env: Env, name: string, fallback: number): number {
   if (!raw) return fallback;
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * A blocking hook's switch. Unlike {@link autoOn}, the hook is OFF unless the
+ * variable is exactly "1": a hook that can refuse a settle must be asked for,
+ * never inherited from the master switch. The pre-filter's skip is the
+ * opposite case — it never blocks — which is why `autoOn` is right for it.
+ */
+export function optIn(env: Env, name: string): boolean {
+  return (env[name] ?? "").trim() === "1";
 }

@@ -96,13 +96,29 @@ describe("readSkillDir / loadSkillRoster", () => {
     expect(loaded[0]!.description).toBe("project version");
   });
 
-  it("derives the same roots OMP discovers skills from", () => {
+  it("derives the roots OMP discovers skills from, not a subset", () => {
     const dirs = defaultSkillDirs("/work/repo", "/home/u");
+    // Native OMP first (project, then the profile's agent dir), then the agent
+    // dirs, then the other hosts' trees OMP also loads into the same roster.
+    // A missing root means the router can rank a skill the host never loaded.
     expect(dirs).toEqual([
       join("/work/repo", ".omp", "skills"),
       join("/home/u", ".omp", "agent", "skills"),
+      join("/work/repo", ".agent", "skills"),
+      join("/work/repo", ".agents", "skills"),
+      join("/home/u", ".agent", "skills"),
       join("/home/u", ".agents", "skills"),
+      join("/work/repo", ".claude", "skills"),
+      join("/home/u", ".claude", "skills"),
+      join("/work/repo", ".codex", "skills"),
+      join("/home/u", ".codex", "skills"),
+      join("/work/repo", ".opencode", "skills"),
+      join("/home/u", ".config", "opencode", "skills"),
     ]);
+    // Precedence: a native root must precede a foreign one of the same name.
+    expect(dirs.indexOf(join("/home/u", ".omp", "agent", "skills"))).toBeLessThan(
+      dirs.indexOf(join("/home/u", ".claude", "skills")),
+    );
   });
 });
 

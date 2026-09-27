@@ -106,10 +106,29 @@ export function defaultSkillDirs(cwd: string, home?: string): string[] {
   // decide whether a test passes. CI has no ~/.agents/skills, and a test that
   // silently depended on it failed there while passing locally.
   const resolved = home ?? process.env.HOME ?? process.env.USERPROFILE ?? homedir();
+
+  // The roots mirror OMP's own discovery, because a roster that lists fewer
+  // roots ranks names the host never loaded — the router would confidently
+  // suggest a skill the model cannot invoke. Order is OMP's precedence: native
+  // project, native user, agent dirs, then the other hosts' trees, which OMP
+  // also reads. Later entries lose on a name collision, exactly as in OMP.
+  const projectDir = cwd;
   return [
-    join(cwd, ".omp", "skills"),
+    // Native OMP: project, then the active profile's agent dir.
+    join(projectDir, ".omp", "skills"),
     join(resolved, ".omp", "agent", "skills"),
+    // Vendor-neutral agent dirs, project before user (OMP scans .agent/.agents).
+    join(projectDir, ".agent", "skills"),
+    join(projectDir, ".agents", "skills"),
+    join(resolved, ".agent", "skills"),
     join(resolved, ".agents", "skills"),
+    // Other hosts whose trees OMP loads into the same roster.
+    join(projectDir, ".claude", "skills"),
+    join(resolved, ".claude", "skills"),
+    join(projectDir, ".codex", "skills"),
+    join(resolved, ".codex", "skills"),
+    join(projectDir, ".opencode", "skills"),
+    join(resolved, ".config", "opencode", "skills"),
   ];
 }
 
