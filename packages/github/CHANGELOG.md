@@ -1,5 +1,12 @@
 # @jev-harness/github
 
+## 0.6.0
+
+### Patch Changes
+
+- Updated dependencies [[`716583b`](https://github.com/Talya1412/jev-harness/commit/716583bed9c8770ee980735a2d9e81ed24c47cf7), [`1e93910`](https://github.com/Talya1412/jev-harness/commit/1e93910e389a6d72ff7a609d7f91fa7263aaeea5), [`9996f9c`](https://github.com/Talya1412/jev-harness/commit/9996f9cdf0f3091e3f02dcd357d1f160aec664cf)]:
+  - @jev-harness/core@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes

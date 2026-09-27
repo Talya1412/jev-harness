@@ -1,6 +1,6 @@
 {
   "name": "@jev-harness/pi",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Pi extension packaging TypeSafe Jev (System One) judgments: tools, skill routing, and verbatim compaction.",
   "keywords": [
     "jev",
@@ -42,11 +42,11 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@jev-harness/core": "^0.5.0",
-    "@jev-harness/kit": "^0.5.0"
+    "@jev-harness/core": "^0.6.0",
+    "@jev-harness/kit": "^0.6.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@earendil-works/pi-coding-agent": "0.87.1",
     "typebox": "^1.3.14",
     "@types/node": "^22.10.2",
     "typescript": "^5.7.2"
