@@ -93,6 +93,9 @@ import {
 } from "./stop-gate.js";
 import { pruneToolResult } from "./prune.js";
 
+/** Hosts already instrumented, so a duplicate module copy cannot double-register. */
+const installedHosts = new WeakSet<object>();
+
 /** `process.env` bound once, so the pure helpers stay testable. */
 const ENV = process.env;
 
@@ -176,6 +179,26 @@ const skillRouter = createSkillRouter({
 });
 
 export default function jevExtension(pi: ExtensionAPI): void {
+  // Idempotency guard, keyed on the HOST instance.
+  //
+  // OMP loads every `.js`/`.ts` file in its extensions directory as an
+  // extension, so a leftover build copy under a name like
+  // `jev-harness.js.bak-20260927` (still ending in `.js`) registers a SECOND
+  // set of hooks into the same process. With `OMP_JEV_STOP=1` that meant several
+  // stop gates armed at once, each able to refuse a settle, and no way to
+  // unregister the stale ones without restarting: the gate appeared "stuck" for
+  // six consecutive turns on 2026-09-27 and the cause was entirely in the file
+  // layout, not the logic.
+  //
+  // A host may only be instrumented once. Keyed per host (not per process) so
+  // tests can build many fresh hosts, and a second call is a silent no-op
+  // because the first registration is already live and correct.
+  if (installedHosts.has(pi as object)) {
+    pi.logger?.debug?.("jev-harness: host already instrumented; skipping duplicate registration");
+    return;
+  }
+  installedHosts.add(pi as object);
+
   const z = pi.zod;
 
   /**

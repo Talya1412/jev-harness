@@ -340,6 +340,28 @@ describe("gate confirmation protocol", () => {
   });
 });
 
+describe("duplicate registration", () => {
+  it("instrumenting the same host twice registers one set of hooks", () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    const registered: string[] = [];
+    const origOn = host.on;
+    host.on = (name: string, fn: any) => {
+      registered.push(name);
+      return origOn(name, fn);
+    };
+
+    jevExtension(host);
+    const first = registered.length;
+    jevExtension(host); // a second copy of the module, as a stray .js file would
+
+    // The second call must add nothing: a duplicate stop gate would arm a second
+    // refusal path that cannot be unregistered without a restart.
+    expect(registered.length).toBe(first);
+    expect(handlers.has("session_stop")).toBe(true);
+  });
+});
+
 describe("stop gate", () => {
   const editThenNothing = [
     {

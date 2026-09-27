@@ -2332,6 +2332,7 @@ async function pruneToolResult(event, ctx, deps) {
 }
 
 // dist/extension.js
+var installedHosts = /* @__PURE__ */ new WeakSet();
 var ENV = process.env;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var maxPerMin = envNum(ENV, "OMP_JEV_MAX_CALLS_PER_MIN", 120);
@@ -2360,6 +2361,11 @@ var skillRouter = createSkillRouter({
   }
 });
 function jevExtension(pi) {
+  if (installedHosts.has(pi)) {
+    pi.logger?.debug?.("jev-harness: host already instrumented; skipping duplicate registration");
+    return;
+  }
+  installedHosts.add(pi);
   const z = pi.zod;
   let blockedCalls = /* @__PURE__ */ new Map();
   let userTurns = 0;
