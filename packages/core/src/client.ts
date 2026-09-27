@@ -5,6 +5,7 @@ import {
   type JevConfig,
   type JevResponse,
   type Questions,
+  type Question,
   type Answer,
   type NoulAnswer,
   type ChoiceAnswer,
@@ -43,7 +44,7 @@ export function validateQuestions(questions: Questions): void {
   if (keys.length === 0)
     throw new JevError("questions must be a non-empty object", { retryable: false });
   for (const key of keys) {
-    const q = questions[key];
+    const q = questions[key] as Question | undefined;
     if (!q || typeof q !== "object")
       throw new JevError(`question "${key}" must be an object`, { retryable: false });
     if (!q.instructions || typeof q.instructions !== "string") {
@@ -52,14 +53,77 @@ export function validateQuestions(questions: Questions): void {
       });
     }
     if (q.type === "choice") {
-      const n = Object.keys(q.criteria ?? {}).length;
-      if (n < 2)
-        throw new JevError(`choice "${key}" needs at least 2 criteria`, { retryable: false });
+      // The criteria MUST be a map of option key -> description. An array (or a
+      // wrapper such as `{ options: [...] }`) is the failure mode this catches:
+      // the API silently answers ONE option at confidence 1.0 rather than
+      // reporting anything wrong, so a caller never learns it asked badly.
+      const criteria = q.criteria as unknown;
+      if (
+        !criteria ||
+        typeof criteria !== "object" ||
+        Array.isArray(criteria) ||
+        Object.keys(criteria).length < 2
+      ) {
+        throw new JevError(
+          `choice "${key}" needs criteria as a map of option -> description with at least 2 options` +
+            (Array.isArray(criteria) || (criteria as any)?.options !== undefined
+              ? ' (an array or {"options": [...]} is read as a single option)'
+              : ""),
+          { retryable: false },
+        );
+      }
+      for (const [label, description] of Object.entries(criteria as Record<string, unknown>)) {
+        if (typeof description !== "string")
+          throw new JevError(
+            `choice "${key}" option "${label}" needs a string description, got ${typeof description}`,
+            { retryable: false },
+          );
+      }
     } else if (q.type === "score") {
-      const n = Array.isArray(q.criteria) ? q.criteria.length : 0;
-      if (n < 2)
-        throw new JevError(`score "${key}" needs at least 2 ordered levels`, { retryable: false });
-    } else if (q.type !== "noul") {
+      const levels = q.criteria as unknown;
+      if (!Array.isArray(levels) || levels.length < 2 || levels.length > 10) {
+        throw new JevError(
+          `score "${key}" needs criteria as an ordered array of 2 to 10 levels (lowest first)` +
+            (Array.isArray(levels)
+              ? `, got ${levels.length}`
+              : `, got ${levels === undefined ? "nothing" : typeof levels}`),
+          { retryable: false },
+        );
+      }
+      for (const level of levels)
+        if (typeof level !== "string")
+          throw new JevError(`score "${key}" levels must be strings, got ${typeof level}`, {
+            retryable: false,
+          });
+    } else if (q.type === "noul") {
+      // A noul criteria, when present, is either prose or a {true,false} map.
+      // Any other key cannot be answered and comes back as a flat 0 or 1.
+      const criteria = (q as { criteria?: unknown }).criteria;
+      if (criteria !== undefined) {
+        if (typeof criteria === "string") {
+          // prose is fine
+        } else if (
+          criteria &&
+          typeof criteria === "object" &&
+          !Array.isArray(criteria) &&
+          Object.keys(criteria as object).length > 0
+        ) {
+          const bad = Object.keys(criteria as object).filter((k) => k !== "true" && k !== "false");
+          if (bad.length > 0)
+            throw new JevError(
+              `noul "${key}" criteria keys must be "true"/"false", got "${bad[0]}"`,
+              { retryable: false },
+            );
+        } else if (Array.isArray(criteria) || criteria === null || typeof criteria !== "object") {
+          throw new JevError(`noul "${key}" criteria must be prose or a {true, false} map`, {
+            retryable: false,
+          });
+        }
+      }
+    } else {
+      // Silently answering an unknown type is the other half of the original
+      // failure class: the question never reaches a primitive and the answer is
+      // meaningless.
       throw new JevError(`question "${key}" has unknown type "${(q as { type?: string }).type}"`, {
         retryable: false,
       });

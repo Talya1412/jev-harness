@@ -153,14 +153,39 @@ function validateQuestions(questions) {
       });
     }
     if (q.type === "choice") {
-      const n = Object.keys(q.criteria ?? {}).length;
-      if (n < 2)
-        throw new JevError(`choice "${key}" needs at least 2 criteria`, { retryable: false });
+      const criteria = q.criteria;
+      if (!criteria || typeof criteria !== "object" || Array.isArray(criteria) || Object.keys(criteria).length < 2) {
+        throw new JevError(`choice "${key}" needs criteria as a map of option -> description with at least 2 options` + (Array.isArray(criteria) || criteria?.options !== void 0 ? ' (an array or {"options": [...]} is read as a single option)' : ""), { retryable: false });
+      }
+      for (const [label, description] of Object.entries(criteria)) {
+        if (typeof description !== "string")
+          throw new JevError(`choice "${key}" option "${label}" needs a string description, got ${typeof description}`, { retryable: false });
+      }
     } else if (q.type === "score") {
-      const n = Array.isArray(q.criteria) ? q.criteria.length : 0;
-      if (n < 2)
-        throw new JevError(`score "${key}" needs at least 2 ordered levels`, { retryable: false });
-    } else if (q.type !== "noul") {
+      const levels = q.criteria;
+      if (!Array.isArray(levels) || levels.length < 2 || levels.length > 10) {
+        throw new JevError(`score "${key}" needs criteria as an ordered array of 2 to 10 levels (lowest first)` + (Array.isArray(levels) ? `, got ${levels.length}` : `, got ${levels === void 0 ? "nothing" : typeof levels}`), { retryable: false });
+      }
+      for (const level of levels)
+        if (typeof level !== "string")
+          throw new JevError(`score "${key}" levels must be strings, got ${typeof level}`, {
+            retryable: false
+          });
+    } else if (q.type === "noul") {
+      const criteria = q.criteria;
+      if (criteria !== void 0) {
+        if (typeof criteria === "string") {
+        } else if (criteria && typeof criteria === "object" && !Array.isArray(criteria) && Object.keys(criteria).length > 0) {
+          const bad = Object.keys(criteria).filter((k) => k !== "true" && k !== "false");
+          if (bad.length > 0)
+            throw new JevError(`noul "${key}" criteria keys must be "true"/"false", got "${bad[0]}"`, { retryable: false });
+        } else if (Array.isArray(criteria) || criteria === null || typeof criteria !== "object") {
+          throw new JevError(`noul "${key}" criteria must be prose or a {true, false} map`, {
+            retryable: false
+          });
+        }
+      }
+    } else {
       throw new JevError(`question "${key}" has unknown type "${q.type}"`, {
         retryable: false
       });
@@ -1762,6 +1787,192 @@ function skillHint(answer) {
   return "[jev] Consider loading skill: " + answer.skill + " (" + Math.round(answer.confidence * 100) + "% from the installed roster)";
 }
 
+// dist/gate-prefilter.js
+var READ_COMMANDS = /* @__PURE__ */ new Set([
+  "dir",
+  "ls",
+  "cat",
+  "type",
+  "head",
+  "tail",
+  "wc",
+  "find",
+  "findstr",
+  "grep",
+  "rg",
+  "sort",
+  "uniq",
+  "which",
+  "where",
+  "echo",
+  "pwd",
+  "cd",
+  "env",
+  "date",
+  "ver",
+  "whoami",
+  "hostname",
+  "stat",
+  "file",
+  "du",
+  "df",
+  "basename",
+  "dirname",
+  "realpath",
+  "readlink",
+  "printenv",
+  "true",
+  "false"
+]);
+var ARG_RULES = {
+  // Bare `env` prints the environment; `env FOO=1 cmd` EXECUTES cmd.
+  env: /^$/,
+  // Bare `hostname` reads it; `hostname name` sets it.
+  hostname: /^$/,
+  // `date` prints; `date -s ...` sets the clock. A +format string is a read.
+  date: /^(?:\+[^\s]*)?$/,
+  // `certutil -hashfile F HASH` is a read; -decode/-encode/-addstore write.
+  certutil: /^-hashfile\b/,
+  // `sort -o out in` writes; every other sort flag is stdout-only.
+  sort: /^(?![\s\S]*(?:^|\s)-o(?:\S+)?(?:\s|$))[\s\S]*$/,
+  // `file -C` / `--compile` writes a compiled magic file.
+  file: /^(?![\s\S]*(?:^|\s)(?:-C\b|--compile\b))[\s\S]*$/
+};
+var ARG_HAZARDS = [
+  ["find", /(?:^|\s)(?:-fprint|-fprintf|-fls)(?:\S*)?(?:\s|$)/],
+  ["uniq", /\s\S+\s+\S+/]
+  // `uniq in out` writes the second positional
+];
+var READ_SUBCOMMANDS = {
+  // List/inspect only: `remote` and `branch` are reads only with a listing
+  // flag, and `tag`/`config` only in their read forms — a bare `git tag v1`,
+  // `git tag -d v1`, `git remote add`, or `git branch -D` all WRITE a ref or
+  // the config. Those argument shapes are the second half of the rule.
+  git: /^(?:(?:log|status|diff|show|ls-remote|rev-parse|describe|ls-files|ls-tree|shortlog|blame)(?:\s|$)|remote(?:\s+(?:-v|show|get-url)(?:\s|$)|$)|branch(?:\s+(?:-a|--all|-l|--list|--show-current|-v|--verbose|-r|--remotes)(?:\s|$)|$)|tag(?:\s+(?:-l|--list|--contains|--points-at)(?:\s|$)|$)|stash\s+list(?:\s|$)|config\s+(?:--get|--get-all|--list|-l|--get-regexp)(?:\s|$)|--version|--help)/,
+  gh: /^(?:api|pr\s+(?:view|list|diff|checks|status)|run\s+(?:view|list)|repo\s+view|auth\s+status|issue\s+(?:view|list)|release\s+(?:view|list)|search\s+\w+|label\s+list)\b/,
+  npm: /^(?:ls|list|view|info|outdated|why|--version|-v)\b/,
+  pnpm: /^(?:ls|list|view|why|outdated|--version|-v)\b/,
+  bun: /^(?:pm\s+ls|--version|-v)\b/,
+  sed: /^-n\b/,
+  node: /^--version$/,
+  python: /^--version$/,
+  python3: /^--version$/,
+  curl: /^[^|;]*(?:$)/,
+  cargo: /^(?:tree|metadata|--version)\b/,
+  go: /^(?:version|env|list)\b/,
+  omp: /^(?:models|stats|--version|-v)\b/
+};
+var DISQUALIFYING = [
+  ">",
+  // redirection, including >> and >file
+  "`",
+  // command substitution
+  "$(",
+  // command substitution
+  "<(",
+  // process substitution
+  "&&",
+  // sequencing hides later writes
+  "||",
+  "|| ",
+  ";",
+  "-exec",
+  "-delete",
+  "-ok",
+  "sed -i",
+  "sed --in-place",
+  "tee",
+  // NOTE: no bare "-o"/"-O" entry here. `grep -o`, `rg -o`, `ps -o` are reads and
+  // are exactly the calls this allowlist exists to spare; the two writers that
+  // motivated a global rule are guarded by head instead — curl by
+  // curlIsReadOnly(), sort by its ARG_RULES entry.
+  "remove-item",
+  "set-content",
+  "out-file",
+  "new-item",
+  "start-process",
+  "invoke-expression",
+  "iex ",
+  "taskkill",
+  "kill "
+];
+function curlIsReadOnly(rest) {
+  return !/(?:^|\s)(?:-o|-O|--output|--remote-name)(?:\s|$|=)/.test(rest);
+}
+function unwrap(command) {
+  const m = /^cmd(?:\.exe)?\s+\/[ck]\s+(.+)$/is.exec(command.trim());
+  if (!m)
+    return command.trim();
+  let inner = m[1].trim();
+  if (inner.startsWith('"') && inner.endsWith('"') && inner.length > 1 || inner.startsWith("'") && inner.endsWith("'") && inner.length > 1) {
+    inner = inner.slice(1, -1);
+  }
+  return inner.trim();
+}
+function headOf(segment) {
+  const first = segment.split(/\s+/)[0] ?? "";
+  return first.split(/[\\/]/).pop().replace(/\.(?:exe|cmd|bat|com)$/i, "").toLowerCase();
+}
+function classifyBashReadOnly(command) {
+  const raw = typeof command === "string" ? command.trim() : "";
+  if (raw === "")
+    return null;
+  if (raw.length > 2e3)
+    return null;
+  const core = unwrap(raw);
+  const lower = core.toLowerCase();
+  for (const bad of DISQUALIFYING) {
+    if (lower.includes(bad))
+      return null;
+  }
+  const segments = core.split("|").map((s) => s.trim()).filter((s) => s !== "");
+  if (segments.length === 0)
+    return null;
+  const rules = [];
+  for (const segment of segments) {
+    const head = headOf(segment);
+    const rest = segment.slice(segment.split(/\s+/)[0]?.length ?? 0).trim();
+    if (head === "")
+      return null;
+    if (READ_COMMANDS.has(head)) {
+      const argRule = ARG_RULES[head];
+      if (argRule && !argRule.test(rest))
+        return null;
+      const hazard = ARG_HAZARDS.find(([h]) => h === head);
+      if (hazard && hazard[1].test(rest))
+        return null;
+      rules.push("read-command:" + head);
+      continue;
+    }
+    if (head in ARG_RULES) {
+      if (!ARG_RULES[head].test(rest))
+        return null;
+      rules.push("read-arg:" + head);
+      continue;
+    }
+    if (head === "cmd" || head === "sh" || head === "bash" || head === "zsh" || head === "pwsh") {
+      return null;
+    }
+    if (head === "powershell" || head === "powershell.exe")
+      return null;
+    const sub = READ_SUBCOMMANDS[head];
+    if (sub) {
+      if (!sub.test(rest))
+        return null;
+      if (head === "curl" && !curlIsReadOnly(rest))
+        return null;
+      if (head === "sed" && /(?:^|\s)-i\b|--in-place/.test(rest))
+        return null;
+      if (head === "gh" && /\s-[Xx]?\s*(POST|PUT|PATCH|DELETE)/i.test(rest))
+        return null;
+      rules.push("read-subcommand:" + head);
+      continue;
+    }
+    return null;
+  }
+  return rules.length > 0 ? rules.join("+") : null;
+}
+
 // dist/prune.js
 var PRUNE_MARKER = "omitted by jev prune";
 var PRUNE_HARD_CAP_CHARS = 2e5;
@@ -1917,6 +2128,26 @@ function jevExtension(pi) {
       const name = String(event?.toolName ?? "");
       if (!/^(bash|write|edit|delete|move|rm|mcp__)/i.test(name))
         return;
+      if (/^bash$/i.test(name)) {
+        const command = String(event?.input?.cmd ?? event?.input?.command ?? "");
+        const rule = classifyBashReadOnly(command);
+        if (rule !== null) {
+          gateLog.record({
+            ts: (/* @__PURE__ */ new Date()).toISOString(),
+            kind: "omp_gate",
+            model: "skipped",
+            digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, [
+              "destructive",
+              "category"
+            ]),
+            answers: { destructive: 0, category: "read-only" },
+            threshold: GATE_THRESHOLD,
+            action: "skip:" + rule,
+            latencyMs: 0
+          });
+          return;
+        }
+      }
       const cfg = jevConfig(void 0, redactOn(ENV, "hook"));
       const startedAt = Date.now();
       const verdict = await judgeDestructiveDual(cfg, { tool: name, input: event?.input ?? {}, cwd: process.cwd() }, { threshold: GATE_THRESHOLD, signal: withDeadline(ctx?.signal, GATE_DEADLINE_MS) });

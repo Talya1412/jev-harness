@@ -21,6 +21,9 @@
  *
  * Hooks (opt-in; default-off individually, not as a group):
  * - 'tool_call': destructive gate — dual gate with a confirm path, fail-open.
+ *   A strictly read-only `bash` command is skipped by a closed-form allowlist
+ *   (gate-prefilter.ts) before any request is spent: the skip means "do not
+ *   judge", never "approve", and everything unrecognised still reaches Jev.
  * - 'before_agent_start': skill suggestion, delivered as a custom message.
  * - 'session_before_compact': verbatim compaction, fail-open.
  *   (the three above require 'OMP_JEV_AUTO=1', each with its own off-switch)
@@ -71,6 +74,7 @@ import {
   userAlreadyChose,
   type RosterSkill,
 } from "./router.js";
+import { classifyBashReadOnly } from "./gate-prefilter.js";
 import { pruneToolResult } from "./prune.js";
 
 /** `process.env` bound once, so the pure helpers stay testable. */
@@ -302,6 +306,35 @@ export default function jevExtension(pi: ExtensionAPI): void {
       const name = String(event?.toolName ?? "");
       // Only adjudicate tools that can mutate the world; cheap reads skip the call.
       if (!/^(bash|write|edit|delete|move|rm|mcp__)/i.test(name)) return;
+      // Second filter, on the CALL rather than the tool name: a bash command
+      // that is provably read-only needs no judgment at all. Measured on this
+      // machine, 94% of everything the gate judged could never be blocked, and
+      // the read-shaped part of it is free to recognise (gate-prefilter.ts).
+      //
+      // A skip returns `undefined`, exactly like the name filter above: it does
+      // NOT approve anything. OMP runs its normal flow, and every command the
+      // allowlist does not recognise — anything mutating, ambiguous, or simply
+      // unseen — still goes to Jev below.
+      if (/^bash$/i.test(name)) {
+        const command = String(event?.input?.cmd ?? event?.input?.command ?? "");
+        const rule = classifyBashReadOnly(command);
+        if (rule !== null) {
+          gateLog.record({
+            ts: new Date().toISOString(),
+            kind: "omp_gate",
+            model: "skipped",
+            digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, [
+              "destructive",
+              "category",
+            ]),
+            answers: { destructive: 0, category: "read-only" },
+            threshold: GATE_THRESHOLD,
+            action: "skip:" + rule,
+            latencyMs: 0,
+          });
+          return;
+        }
+      }
       const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
       const startedAt = Date.now();
       const verdict = await judgeDestructiveDual(

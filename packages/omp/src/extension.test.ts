@@ -260,6 +260,49 @@ describe("tool_call gate", () => {
     expect(verdict).toBeUndefined();
   });
 
+  it("SKIPS the request entirely for a provably read-only bash command", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+
+    const fetchMock = vi.fn(async () => gateBody(0.95, "destructive", 0.9));
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Read-shaped commands are decided by the closed-form allowlist, so no
+    // request is sent at all — the point of the pre-filter.
+    for (const cmd of ["ls -la", "grep -rn TODO src", "gh api repos/a/b", "git log --oneline -5"]) {
+      const verdict = await handlers.get("tool_call")!({ toolName: "bash", input: { cmd } });
+      expect(verdict).toBeUndefined();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // The same shape with a write in it still reaches Jev.
+    await handlers.get("tool_call")!({ toolName: "bash", input: { cmd: "ls -la > out.txt" } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT skip a write, a delete, or a nested shell", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+
+    const fetchMock = vi.fn(async () => gateBody(0.05, "read-only", 0.95));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hazards = [
+      "rm -rf build",
+      'cmd /c "del x"',
+      "curl -sL https://x -o out.bin",
+      "node -e \"require('fs').unlinkSync('x')\"",
+      "bash -c 'rm -rf /'",
+      "git push origin master",
+    ];
+    for (const cmd of hazards) {
+      await handlers.get("tool_call")!({ toolName: "bash", input: { cmd } });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(hazards.length);
+  });
+
   it("FAILS OPEN when Jev errors, and names the failure kind", async () => {
     setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
     const { host, handlers, debug } = makeHost();

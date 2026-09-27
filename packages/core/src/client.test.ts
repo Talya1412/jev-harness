@@ -33,18 +33,173 @@ describe("validateQuestions", () => {
   it("rejects a choice with fewer than two criteria", () => {
     expect(() =>
       validateQuestions({ q: { type: "choice", instructions: "pick", criteria: { only: "one" } } }),
-    ).toThrow(/at least 2 criteria/);
+    ).toThrow(/map of option -> description/);
   });
 
   it("rejects a score with fewer than two levels", () => {
     expect(() =>
       validateQuestions({ q: { type: "score", instructions: "rate", criteria: ["single"] } }),
-    ).toThrow(/at least 2 ordered levels/);
+    ).toThrow(/2 to 10 levels/);
   });
 
   it("accepts a well-formed noul without criteria", () => {
     expect(() => validateQuestions({ q: { type: "noul", instructions: "is it?" } })).not.toThrow();
   });
+
+  // The failure class below is invisible at runtime: the API answers one option
+  // at confidence 1.0 instead of reporting a malformed question, so a caller
+  // that gets it wrong never finds out. These tests pin the shapes that were
+  // silently accepted before.
+  it("rejects a choice whose criteria is an ARRAY (read as one option at 1.0)", () => {
+    expect(() =>
+      validateQuestions({
+        q: { type: "choice", instructions: "pick", criteria: ["a", "b"] as any },
+      }),
+    ).toThrow(/map of option -> description/);
+  });
+
+  it("rejects a choice wrapped as { options: [...] }", () => {
+    expect(() =>
+      validateQuestions({
+        q: { type: "choice", instructions: "pick", criteria: { options: ["a", "b"] } as any },
+      }),
+    ).toThrow(/map of option -> description/);
+  });
+
+  it("rejects a choice option with a non-string description", () => {
+    expect(() =>
+      validateQuestions({
+        q: { type: "choice", instructions: "pick", criteria: { a: 1, b: "two" } as any },
+      }),
+    ).toThrow(/needs a string description/);
+  });
+
+  it("rejects a score with more than ten levels", () => {
+    expect(() =>
+      validateQuestions({
+        q: {
+          type: "score",
+          instructions: "rate",
+          criteria: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
+        },
+      }),
+    ).toThrow(/2 to 10 levels/);
+  });
+
+  it("rejects a score whose levels are not strings", () => {
+    expect(() =>
+      validateQuestions({ q: { type: "score", instructions: "rate", criteria: [1, 2] as any } }),
+    ).toThrow(/levels must be strings/);
+  });
+
+  it("rejects a noul with criteria keys other than true/false", () => {
+    expect(() =>
+      validateQuestions({
+        q: { type: "noul", instructions: "is it?", criteria: { yes: "a", no: "b" } as any },
+      }),
+    ).toThrow(/criteria keys must be "true"\/"false"/);
+  });
+
+  it("accepts prose criteria and a {true,false} map for noul", () => {
+    expect(() =>
+      validateQuestions({ q: { type: "noul", instructions: "is it?", criteria: "some prose" } }),
+    ).not.toThrow();
+    expect(() =>
+      validateQuestions({
+        q: {
+          type: "noul",
+          instructions: "is it?",
+          criteria: { true: "yes case", false: "no case" },
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts a well-formed choice map and a well-formed score", () => {
+    expect(() =>
+      validateQuestions({
+        q: { type: "choice", instructions: "pick", criteria: { a: "one", b: "two" } },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateQuestions({ q: { type: "score", instructions: "rate", criteria: ["lo", "hi"] } }),
+    ).not.toThrow();
+  });
+});
+// The failure class below is invisible at runtime: the API answers one option
+// at confidence 1.0 instead of reporting a malformed question, so a caller
+// that gets it wrong never finds out. These tests pin the shapes that were
+// silently accepted before.
+it("rejects a choice whose criteria is an ARRAY (read as one option at 1.0)", () => {
+  expect(() =>
+    validateQuestions({
+      q: { type: "choice", instructions: "pick", criteria: ["a", "b"] as any },
+    }),
+  ).toThrow(/map of option -> description/);
+});
+
+it("rejects a choice wrapped as { options: [...] }", () => {
+  expect(() =>
+    validateQuestions({
+      q: { type: "choice", instructions: "pick", criteria: { options: ["a", "b"] } as any },
+    }),
+  ).toThrow(/map of option -> description/);
+});
+
+it("rejects a choice option with a non-string description", () => {
+  expect(() =>
+    validateQuestions({
+      q: { type: "choice", instructions: "pick", criteria: { a: 1, b: "two" } as any },
+    }),
+  ).toThrow(/needs a string description/);
+});
+
+it("rejects a score with more than ten levels", () => {
+  expect(() =>
+    validateQuestions({
+      q: {
+        type: "score",
+        instructions: "rate",
+        criteria: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
+      },
+    }),
+  ).toThrow(/2 to 10 levels/);
+});
+
+it("rejects a score whose levels are not strings", () => {
+  expect(() =>
+    validateQuestions({ q: { type: "score", instructions: "rate", criteria: [1, 2] as any } }),
+  ).toThrow(/levels must be strings/);
+});
+
+it("rejects a noul with criteria keys other than true/false", () => {
+  expect(() =>
+    validateQuestions({
+      q: { type: "noul", instructions: "is it?", criteria: { yes: "a", no: "b" } as any },
+    }),
+  ).toThrow(/criteria keys must be "true"\/"false"/);
+});
+
+it("accepts prose criteria and a {true,false} map for noul", () => {
+  expect(() =>
+    validateQuestions({ q: { type: "noul", instructions: "is it?", criteria: "some prose" } }),
+  ).not.toThrow();
+  expect(() =>
+    validateQuestions({
+      q: { type: "noul", instructions: "is it?", criteria: { true: "yes case", false: "no case" } },
+    }),
+  ).not.toThrow();
+});
+
+it("accepts a well-formed choice map and a well-formed score", () => {
+  expect(() =>
+    validateQuestions({
+      q: { type: "choice", instructions: "pick", criteria: { a: "one", b: "two" } },
+    }),
+  ).not.toThrow();
+  expect(() =>
+    validateQuestions({ q: { type: "score", instructions: "rate", criteria: ["lo", "hi"] } }),
+  ).not.toThrow();
 });
 
 describe("askJev", () => {
