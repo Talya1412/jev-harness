@@ -1,5 +1,13 @@
 # @jev-harness/claude-code
 
+## 0.7.0
+
+### Patch Changes
+
+- Updated dependencies [[`6e6f182`](https://github.com/Talya1412/jev-harness/commit/6e6f182d7116382b53277cd1576f40b9ddbcfa1e)]:
+  - @jev-harness/core@0.7.0
+  - @jev-harness/kit@0.7.0
+
 ## 0.6.0
 
 ### Patch Changes
