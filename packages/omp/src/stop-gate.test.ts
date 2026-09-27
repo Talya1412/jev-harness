@@ -129,6 +129,69 @@ describe("collectStopEvidence", () => {
     expect(ev.edits.map((e) => e.path)).toEqual(["src/b.ts"]);
   });
 
+  it("sees a check run through a code runner, not only a top-level bash call", () => {
+    // This harness drives nearly everything from `fabric_exec` / `eval`, where
+    // the shell command lives inside JavaScript. Judging only `bash` made every
+    // real check invisible and refused sessions that had run the full suite.
+    const ev = collectStopEvidence([
+      call("1", "write", { file_path: "src/a.ts" }),
+      result("1", "ok"),
+      call("2", "fabric_exec", { code: 'await omp.bash({ cmd: "npm test", settle: true });' }),
+      result("2", "236 passed, 0 fail"),
+    ]);
+    expect(ev.edits).toHaveLength(1);
+    expect(ev.checks.map((c) => c.command)).toEqual(["npm test"]);
+    expect(ev.checks[0].passed).toBe(true);
+    expect(decideStop(ev).block).toBe(false);
+  });
+
+  it("sees a check inside an eval cell that uses subprocess", () => {
+    const ev = collectStopEvidence([
+      call("1", "edit", { file_path: "a.py" }),
+      result("1", "ok"),
+      call("2", "eval", { code: "subprocess.run(['pytest', '-q'])" }),
+      result("2", "all good"),
+    ]);
+    // A single-quoted 'pytest' inside a runner IS a command it may run, so the
+    // check counts — the conservative direction is to SEE a check, because a
+    // missed check produces a refusal that is wrong.
+    expect(ev.checks.length).toBeGreaterThan(0);
+    expect(decideStop(ev).block).toBe(false);
+
+    const ev2 = collectStopEvidence([
+      call("1", "edit", { file_path: "a.py" }),
+      result("1", "ok"),
+      call("2", "eval", { code: 'subprocess.run("npx vitest run", shell=True)' }),
+      result("2", "ok"),
+    ]);
+    expect(ev2.checks.map((c) => c.command)).toEqual(["npx vitest run"]);
+  });
+
+  it("judges EVERY command in one code runner, so a passing test is not lost", () => {
+    const ev = collectStopEvidence([
+      call("1", "write", { file_path: "a.ts" }),
+      result("1", "ok"),
+      call("2", "fabric_exec", {
+        code: 'await omp.bash({ cmd: "npm run qa" }); console.log("npm test done");',
+      }),
+      result("2", "rc=0"),
+    ]);
+    expect(ev.checks.length).toBeGreaterThan(0);
+    expect(decideStop(ev).block).toBe(false);
+  });
+
+  it("does not mistake identifier text in a runner for a command", () => {
+    const ev = collectStopEvidence([
+      call("1", "write", { file_path: "a.ts" }),
+      result("1", "ok"),
+      call("2", "fabric_exec", { code: "const npmTestResult = compute();" }),
+      result("2", "ok"),
+    ]);
+    // No quoted shell command: the write stays unverified.
+    expect(ev.checks).toHaveLength(0);
+    expect(decideStop(ev).block).toBe(true);
+  });
+
   it("survives a malformed message without throwing", () => {
     const ev = collectStopEvidence([
       null,

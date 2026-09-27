@@ -123,6 +123,64 @@ function commandFromInput(input: Record<string, unknown>): string | null {
 }
 
 /**
+ * Every command string worth inspecting in a call, wherever it hides.
+ *
+ * The gate is BLIND to how this harness actually runs checks: almost nothing
+ * reaches it as a top-level `bash` call. A host tool is driven from the code
+ * runners (`fabric_exec`, `eval`, `run_code`), so `omp.bash({ cmd: "npm test" })`
+ * appears as a `fabric_exec` call whose INPUT is JavaScript, and `subprocess.run`
+ * as an `eval` call. Judging only `bash` made every check invisible, so a session
+ * that ran the full suite before finishing was still refused — the second and
+ * worse false negative found on 2026-09-27.
+ *
+ * So: collect the direct command, then mine the code-runner sources for shell
+ * commands. Quoted strings only, so ordinary identifier text is not mistaken for
+ * a command, and a call can contribute MANY commands (a runner that runs a test
+ * and then a grep is judged on both).
+ */
+const CODE_RUNNER_TOOLS = /^(?:fabric_exec|eval|run_code|run|code)$/i;
+
+/** Longest-first so a source string is never truncated mid-command. */
+const SHELL_HINTS =
+  "npm|pnpm|yarn|bun|npx|pnpx|vitest|jest|pytest|tsc|eslint|prettier|cargo|go|dotnet|make|gradle|mvn|node|python3?|bash|sh|cmd|powershell|pwsh|make";
+
+function commandsFromCall(tool: string, input: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const direct = commandFromInput(input);
+  if (direct !== null) out.push(direct);
+  if (!CODE_RUNNER_TOOLS.test(tool)) return out;
+
+  // Any string value in the call may carry code; look inside each.
+  const sources: string[] = [];
+  const walk = (v: unknown, depth = 0): void => {
+    if (depth > 4 || v == null) return;
+    if (typeof v === "string") {
+      if (v.length > 0 && v.length < 100_000) sources.push(v);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x, depth + 1);
+      return;
+    }
+    if (typeof v === "object") for (const x of Object.values(v as object)) walk(x, depth + 1);
+  };
+  walk(input);
+
+  // Quoted strings that mention a check-ish binary are candidate commands.
+  const quoted = new RegExp(
+    `["'\`]([^"'\`\n]{0,300}?(?:${SHELL_HINTS})[^"'\`\n]{0,300}?)["'\`]`,
+    "gi",
+  );
+  for (const src of sources) {
+    for (const m of src.matchAll(quoted)) {
+      const candidate = m[1]!.trim();
+      if (candidate !== "" && !out.includes(candidate)) out.push(candidate);
+    }
+  }
+  return out;
+}
+
+/**
  * Walk the session's messages in order and collect the only two facts the rule
  * needs: which files were edited, and which checks passed.
  *
@@ -150,13 +208,25 @@ export function collectStopEvidence(messages: readonly unknown[]): StopGateEvide
       pending.set(id, { kind: "edit", tool, path: paths[0] ?? "", command: "" });
       return;
     }
-    const command = commandFromInput(input);
-    if (command === null) return;
-    if (CHECK_PATTERN.test(command)) {
-      checks.push({ command, passed: true, at }); // flipped by the result below
-      pending.set(id, { kind: "check", tool, path: "", command });
-    } else if (MUTATING_PATTERN.test(command)) {
-      pending.set(id, { kind: "mutate", tool, path: "", command });
+    // A call may carry several commands (a code runner can invoke more than
+    // one shell step); each is judged on its own so a passing test is not lost
+    // because a later grep in the same call did not match.
+    let sawMutating = false;
+    let firstCommand: string | null = null;
+    for (const command of commandsFromCall(tool, input)) {
+      firstCommand ??= command;
+      if (CHECK_PATTERN.test(command)) {
+        checks.push({ command, passed: true, at }); // flipped by the result below
+        pending.set(id, { kind: "check", tool, path: "", command });
+      } else if (MUTATING_PATTERN.test(command)) {
+        sawMutating = true;
+      }
+    }
+    if (firstCommand === null) return;
+    if (sawMutating && !pending.has(id)) {
+      pending.set(id, { kind: "mutate", tool, path: "", command: firstCommand });
+      mutatingAt.push(at);
+    } else if (sawMutating) {
       mutatingAt.push(at);
     }
   };

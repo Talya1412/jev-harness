@@ -2102,6 +2102,46 @@ function commandFromInput(input) {
   }
   return null;
 }
+var CODE_RUNNER_TOOLS = /^(?:fabric_exec|eval|run_code|run|code)$/i;
+var SHELL_HINTS = "npm|pnpm|yarn|bun|npx|pnpx|vitest|jest|pytest|tsc|eslint|prettier|cargo|go|dotnet|make|gradle|mvn|node|python3?|bash|sh|cmd|powershell|pwsh|make";
+function commandsFromCall(tool, input) {
+  const out = [];
+  const direct = commandFromInput(input);
+  if (direct !== null)
+    out.push(direct);
+  if (!CODE_RUNNER_TOOLS.test(tool))
+    return out;
+  const sources = [];
+  const walk2 = (v, depth = 0) => {
+    if (depth > 4 || v == null)
+      return;
+    if (typeof v === "string") {
+      if (v.length > 0 && v.length < 1e5)
+        sources.push(v);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const x of v)
+        walk2(x, depth + 1);
+      return;
+    }
+    if (typeof v === "object")
+      for (const x of Object.values(v))
+        walk2(x, depth + 1);
+  };
+  walk2(input);
+  const quoted = new RegExp(`["'\`]([^"'\`
+]{0,300}?(?:${SHELL_HINTS})[^"'\`
+]{0,300}?)["'\`]`, "gi");
+  for (const src of sources) {
+    for (const m of src.matchAll(quoted)) {
+      const candidate = m[1].trim();
+      if (candidate !== "" && !out.includes(candidate))
+        out.push(candidate);
+    }
+  }
+  return out;
+}
 function collectStopEvidence(messages) {
   const edits = [];
   const checks = [];
@@ -2117,14 +2157,23 @@ function collectStopEvidence(messages) {
       pending.set(id, { kind: "edit", tool, path: paths[0] ?? "", command: "" });
       return;
     }
-    const command = commandFromInput(input);
-    if (command === null)
+    let sawMutating = false;
+    let firstCommand = null;
+    for (const command of commandsFromCall(tool, input)) {
+      firstCommand ??= command;
+      if (CHECK_PATTERN.test(command)) {
+        checks.push({ command, passed: true, at });
+        pending.set(id, { kind: "check", tool, path: "", command });
+      } else if (MUTATING_PATTERN.test(command)) {
+        sawMutating = true;
+      }
+    }
+    if (firstCommand === null)
       return;
-    if (CHECK_PATTERN.test(command)) {
-      checks.push({ command, passed: true, at });
-      pending.set(id, { kind: "check", tool, path: "", command });
-    } else if (MUTATING_PATTERN.test(command)) {
-      pending.set(id, { kind: "mutate", tool, path: "", command });
+    if (sawMutating && !pending.has(id)) {
+      pending.set(id, { kind: "mutate", tool, path: "", command: firstCommand });
+      mutatingAt.push(at);
+    } else if (sawMutating) {
       mutatingAt.push(at);
     }
   };
