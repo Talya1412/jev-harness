@@ -105,6 +105,30 @@ describe("collectStopEvidence", () => {
     expect(ev.edits[0].path).toBe("a.ts");
   });
 
+  it("does NOT count a write to a non-file sink as an edit", () => {
+    // `write { path: "xd://report_issue" }` calls a tool device; it touches no
+    // workspace file. Counting it armed the gate on a session that had changed
+    // nothing on disk — the false block that fired for real on 2026-09-27.
+    const ev = collectStopEvidence([
+      call("1", "write", { path: "xd://report_issue" }),
+      result("1", "Noted, thanks!"),
+    ]);
+    expect(ev.edits).toEqual([]);
+    expect(decideStop(ev).block).toBe(false);
+  });
+
+  it("still counts a real file when a non-file sink shares the call", () => {
+    const ev = collectStopEvidence([call("1", "write", { path: "src/a.ts" })]);
+    expect(ev.edits.map((e) => e.path)).toEqual(["src/a.ts"]);
+  });
+
+  it("excludes the non-file path from the named files when mixed", () => {
+    const ev = collectStopEvidence([
+      call("1", "write", { paths: ["xd://report_issue", "src/b.ts"] }),
+    ]);
+    expect(ev.edits.map((e) => e.path)).toEqual(["src/b.ts"]);
+  });
+
   it("survives a malformed message without throwing", () => {
     const ev = collectStopEvidence([
       null,

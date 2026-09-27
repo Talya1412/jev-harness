@@ -15,6 +15,23 @@
 /** Names that mean "read or change a file", by the tool's own identity. */
 const EDIT_TOOLS = /^(?:write|edit|ast_edit|multiedit|notebookedit|apply_patch|patch)$/i;
 
+/**
+ * A target that is a NON-workspace sink — an xd:// tool device, a fanout
+ * destination — is not a file edit. This module shipped once counting
+ * `write { path: "xd://report_issue" }` as a changed file, and the resulting
+ * refusal fired on a session that had changed nothing on disk: exactly the
+ * false block that gets a gate removed. Detection is by target scheme, not by
+ * running the check later and hoping no session ever does this.
+ */
+const NON_FILE_TARGET = /^(?:[a-z][a-z0-9+.-]*):\/\//i;
+
+/** True when an edit tool was pointed at a real workspace file. */
+function isWorkspaceEdit(input: Record<string, unknown>): boolean {
+  const paths = pathsFromInput(input);
+  if (paths.length === 0) return false;
+  return paths.some((p) => !NON_FILE_TARGET.test(p));
+}
+
 /** Commands that count as verification when they run and succeed. */
 const CHECK_PATTERN =
   /(?:^|[\s&|;])(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|tests|lint|typecheck|check|build|qa|verify)\b|\b(?:npx|pnpx)\s+(?:vitest|jest|tsc|eslint|prettier|playwright)\b|\b(?:vitest|jest|pytest|tsc|eslint)\b|\bcargo\s+(?:test|check|clippy|build)\b|\bgo\s+(?:test|build|vet)\b|\b(?:pytest|ruff|mypy)\b|\bdotnet\s+(?:test|build)\b|\bmake\b|\bgradle\b|\bmvn\b/i;
@@ -125,7 +142,10 @@ export function collectStopEvidence(messages: readonly unknown[]): StopGateEvide
 
   const recordCall = (id: string, tool: string, input: Record<string, unknown>) => {
     if (EDIT_TOOLS.test(tool)) {
-      const paths = pathsFromInput(input);
+      // A write aimed at a non-file sink (xd:// device, fanout) changes no
+      // workspace file and must never arm the gate.
+      if (!isWorkspaceEdit(input)) return;
+      const paths = pathsFromInput(input).filter((p) => !NON_FILE_TARGET.test(p));
       edits.push({ tool, path: paths[0] ?? "", at });
       pending.set(id, { kind: "edit", tool, path: paths[0] ?? "", command: "" });
       return;

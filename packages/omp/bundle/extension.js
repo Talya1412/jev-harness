@@ -2044,6 +2044,13 @@ function classifyBashReadOnly(command) {
 
 // dist/stop-gate.js
 var EDIT_TOOLS = /^(?:write|edit|ast_edit|multiedit|notebookedit|apply_patch|patch)$/i;
+var NON_FILE_TARGET = /^(?:[a-z][a-z0-9+.-]*):\/\//i;
+function isWorkspaceEdit(input) {
+  const paths = pathsFromInput(input);
+  if (paths.length === 0)
+    return false;
+  return paths.some((p) => !NON_FILE_TARGET.test(p));
+}
 var CHECK_PATTERN = /(?:^|[\s&|;])(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|tests|lint|typecheck|check|build|qa|verify)\b|\b(?:npx|pnpx)\s+(?:vitest|jest|tsc|eslint|prettier|playwright)\b|\b(?:vitest|jest|pytest|tsc|eslint)\b|\bcargo\s+(?:test|check|clippy|build)\b|\bgo\s+(?:test|build|vet)\b|\b(?:pytest|ruff|mypy)\b|\bdotnet\s+(?:test|build)\b|\bmake\b|\bgradle\b|\bmvn\b/i;
 var MUTATING_PATTERN = /\b(?:rm|del|mv|move|cp|copy|mkdir|rmdir|touch|sed\s+-i|tee)\b|>{1,2}\s*\S|\bgit\s+(?:commit|push|reset|clean|checkout|restore|apply|merge|rebase|stash)\b|\bnpm\s+(?:install|i|publish|version)\b|\bpip\s+install\b/i;
 var asRecord = (v) => v && typeof v === "object" ? v : {};
@@ -2103,7 +2110,9 @@ function collectStopEvidence(messages) {
   let at = 0;
   const recordCall = (id, tool, input) => {
     if (EDIT_TOOLS.test(tool)) {
-      const paths = pathsFromInput(input);
+      if (!isWorkspaceEdit(input))
+        return;
+      const paths = pathsFromInput(input).filter((p) => !NON_FILE_TARGET.test(p));
       edits.push({ tool, path: paths[0] ?? "", at });
       pending.set(id, { kind: "edit", tool, path: paths[0] ?? "", command: "" });
       return;
