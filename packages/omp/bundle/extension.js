@@ -2262,6 +2262,15 @@ var skillRouter = createSkillRouter({
 });
 function jevExtension(pi) {
   const z = pi.zod;
+  let blockedCalls = /* @__PURE__ */ new Map();
+  let userTurns = 0;
+  const resetConfirmations = () => {
+    blockedCalls = /* @__PURE__ */ new Map();
+    userTurns = 0;
+  };
+  pi.on("session_start", async () => resetConfirmations());
+  pi.on("session_switch", async () => resetConfirmations());
+  pi.on("session_shutdown", async () => resetConfirmations());
   pi.registerTool({
     name: "jev",
     label: "Jev",
@@ -2369,6 +2378,16 @@ function jevExtension(pi) {
           return;
         }
       }
+      const digest = decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, [
+        "destructive",
+        "category"
+      ]);
+      const blockedAt = blockedCalls.get(digest);
+      if (blockedAt !== void 0 && userTurns > blockedAt) {
+        blockedCalls.delete(digest);
+        refusals.record("gate:confirmed", "user-confirmed");
+        return;
+      }
       const cfg = jevConfig(void 0, redactOn(ENV, "hook"));
       const startedAt = Date.now();
       const verdict = await judgeDestructiveDual(cfg, { tool: name, input: event?.input ?? {}, cwd: process.cwd() }, { threshold: GATE_THRESHOLD, signal: withDeadline(ctx?.signal, GATE_DEADLINE_MS) });
@@ -2376,10 +2395,7 @@ function jevExtension(pi) {
         ts: (/* @__PURE__ */ new Date()).toISOString(),
         kind: "omp_gate",
         model: cfg.model ?? "unknown",
-        digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, [
-          "destructive",
-          "category"
-        ]),
+        digest,
         answers: { destructive: verdict.destructive, category: verdict.category },
         threshold: GATE_THRESHOLD,
         action: verdict.decision,
@@ -2388,6 +2404,7 @@ function jevExtension(pi) {
       if (verdict.decision === "allow")
         return;
       refusals.record("gate:" + name, verdict.decision + ":" + verdict.category);
+      blockedCalls.set(digest, userTurns);
       if (verdict.decision === "block") {
         return {
           block: true,
@@ -2442,6 +2459,7 @@ function jevExtension(pi) {
   });
   let pendingHint = null;
   pi.on("input", async (event, ctx) => {
+    userTurns++;
     if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER") || sessionDisabled)
       return;
     let text = "";

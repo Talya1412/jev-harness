@@ -234,6 +234,112 @@ describe("savings mode", () => {
   });
 });
 
+describe("gate confirmation protocol", () => {
+  const destructive = { toolName: "bash", input: { cmd: "rm -rf /tmp/x" } };
+
+  it("allows an identical call once the user has spoken since the block", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+
+    // First attempt: judged destructive, so it is refused.
+    const fetchMock = vi.fn(async () => gateBody(0.95, "destructive", 0.9));
+    vi.stubGlobal("fetch", fetchMock);
+    const first: any = await handlers.get("tool_call")!(destructive);
+    expect(first.block).toBe(true);
+
+    // The user answers the refusal with a prompt.
+    await handlers.get("input")!({ text: "yes, delete it, I asked for that" });
+
+    // The SAME call now goes through, and no second judgment is paid for.
+    const callsBefore = fetchMock.mock.calls.length;
+    const second = await handlers.get("tool_call")!(destructive);
+    expect(second).toBeUndefined();
+    expect(fetchMock.mock.calls.length).toBe(callsBefore);
+  });
+
+  it("re-judges a call that CHANGED after a block, rather than exempting it", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+
+    const fetchMock = vi.fn(async () => gateBody(0.95, "destructive", 0.9));
+    vi.stubGlobal("fetch", fetchMock);
+    await handlers.get("tool_call")!(destructive);
+    await handlers.get("input")!({ text: "ok" });
+
+    // A different command is a different digest: the exemption does not carry.
+    const other: any = await handlers.get("tool_call")!({
+      toolName: "bash",
+      input: { cmd: "rm -rf /" },
+    });
+    expect(other.block).toBe(true);
+    expect(fetchMock.mock.calls.length).toBe(2);
+  });
+
+  it("does not carry an exemption across a session boundary", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => gateBody(0.95, "destructive", 0.9)),
+    );
+
+    const first: any = await handlers.get("tool_call")!({
+      toolName: "bash",
+      input: { cmd: "rm -rf /x" },
+    });
+    expect(first.block).toBe(true);
+    await handlers.get("input")!({ text: "confirmed" });
+
+    // A different session must not inherit the pending confirmation.
+    await handlers.get("session_switch")!({});
+    const after: any = await handlers.get("tool_call")!({
+      toolName: "bash",
+      input: { cmd: "rm -rf /x" },
+    });
+    expect(after.block).toBe(true);
+  });
+
+  it("does NOT exempt a call before the user has spoken", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => gateBody(0.95, "destructive", 0.9)),
+    );
+
+    await handlers.get("tool_call")!(destructive);
+    // No prompt in between: the second attempt is refused again, on a fresh judgment.
+    const second: any = await handlers.get("tool_call")!(destructive);
+    expect(second.block).toBe(true);
+  });
+
+  it("gives a reversible-mutation confirm the same treatment", async () => {
+    setEnv({ TYPESAFE_API_KEY: "test-key", OMP_JEV_AUTO: "1" });
+    const { host, handlers } = makeHost();
+    jevExtension(host);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => gateBody(0.84, "unknown", 0.2)),
+    );
+
+    const first: any = await handlers.get("tool_call")!({
+      toolName: "bash",
+      input: { cmd: "python3 x.py" },
+    });
+    expect(first.block).toBe(true);
+    await handlers.get("input")!({ text: "go ahead" });
+    const second = await handlers.get("tool_call")!({
+      toolName: "bash",
+      input: { cmd: "python3 x.py" },
+    });
+    expect(second).toBeUndefined();
+  });
+});
+
 describe("stop gate", () => {
   const editThenNothing = [
     {

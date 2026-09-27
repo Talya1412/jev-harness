@@ -139,6 +139,23 @@ const gateLog = createDecisionLog(
 export const refusals = createTracedLedger(ENV.OMP_JEV_DECISION_LOG);
 
 /**
+ * The gate's confirmation protocol, made real.
+ *
+ * The refusal message tells the model to "re-issue the same call once the user
+ * has confirmed it explicitly" — but a `tool_call` event carries only
+ * `{ toolName, input }`. The gate cannot see the conversation, so a restated
+ * confirmation is invisible to it and the identical call blocks forever. That
+ * is a broken promise rather than a safety property: it strands the user who
+ * did exactly what they were told to do.
+ *
+ * The fix uses the one signal the adapter does see: the `input` hook fires on
+ * every user prompt. A blocked call is remembered by digest, and the same call
+ * returning AFTER the user has spoken is treated as that confirmation. Any
+ * change to the call changes the digest, so a modified call is a fresh
+ * judgment rather than a re-use of the exemption.
+ */
+
+/**
  * Set once an `auth` or `model` failure proves the configured key/model
  * cannot work. Every later call fails identically while still spending the host
  * handler's latency budget, so the hooks stand down until the process restarts.
@@ -160,6 +177,27 @@ const skillRouter = createSkillRouter({
 
 export default function jevExtension(pi: ExtensionAPI): void {
   const z = pi.zod;
+
+  /**
+   * Confirmation protocol state, SCOPED TO THIS EXTENSION INSTANCE (a session).
+   * Process-wide state would leak an exemption from one session into another:
+   * the same command blocked in project A would be silently allowed in project
+   * B once the user typed anything anywhere in between.
+   */
+  let blockedCalls = new Map<string, number>();
+  /** User prompts seen this session — the "has the user spoken since?" clock. */
+  let userTurns = 0;
+
+  // A new session starts with no confirmations outstanding. `session_switch`
+  // matters as much as `session_start`: without it, a confirmation given in one
+  // session would survive into another one the user switched to.
+  const resetConfirmations = () => {
+    blockedCalls = new Map();
+    userTurns = 0;
+  };
+  pi.on("session_start", async () => resetConfirmations());
+  pi.on("session_switch", async () => resetConfirmations());
+  pi.on("session_shutdown", async () => resetConfirmations());
 
   pi.registerTool({
     name: "jev",
@@ -361,6 +399,20 @@ export default function jevExtension(pi: ExtensionAPI): void {
           return;
         }
       }
+      // The confirmation protocol: if this EXACT call was blocked and the user
+      // has spoken since, they are answering the refusal we gave them. The
+      // digest covers tool+input, so any edit to the call re-judges it.
+      const digest = decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, [
+        "destructive",
+        "category",
+      ]);
+      const blockedAt = blockedCalls.get(digest);
+      if (blockedAt !== undefined && userTurns > blockedAt) {
+        blockedCalls.delete(digest);
+        refusals.record("gate:confirmed", "user-confirmed");
+        return; // allow the call the user explicitly confirmed
+      }
+
       const cfg = jevConfig(undefined, redactOn(ENV, "hook"));
       const startedAt = Date.now();
       const verdict = await judgeDestructiveDual(
@@ -372,10 +424,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
         ts: new Date().toISOString(),
         kind: "omp_gate",
         model: cfg.model ?? "unknown",
-        digest: decisionDigest("omp_gate", { tool: name, input: event?.input ?? {} }, [
-          "destructive",
-          "category",
-        ]),
+        digest,
         answers: { destructive: verdict.destructive, category: verdict.category },
         threshold: GATE_THRESHOLD,
         action: verdict.decision,
@@ -389,6 +438,9 @@ export default function jevExtension(pi: ExtensionAPI): void {
       // blocked with no way forward), so the reason names the legal move:
       // re-issue the SAME call once the user has confirmed it explicitly.
       refusals.record("gate:" + name, verdict.decision + ":" + verdict.category);
+      // Remember which call was refused, so the user's next word can confirm it
+      // instead of the model looping on an unwinnable refusal.
+      blockedCalls.set(digest, userTurns);
       if (verdict.decision === "block") {
         return {
           block: true,
@@ -498,6 +550,10 @@ export default function jevExtension(pi: ExtensionAPI): void {
   // and cached (router.ts), so a burst of prompts costs at most one call.
   let pendingHint: string | null = null;
   pi.on("input", async (event: any, ctx: any) => {
+    // Counted BEFORE any early return: this clock is what tells the gate the
+    // user has spoken since a block, so it must tick even when routing is off
+    // or the prompt is too short to route.
+    userTurns++;
     if (!autoOn(ENV, "OMP_JEV_SKILL_ROUTER") || sessionDisabled) return;
     // Hoisted so the catch can run the degraded local router over the SAME
     // inputs. They are assigned before the Jev call on every path that reaches
