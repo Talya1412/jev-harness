@@ -11,11 +11,17 @@ name: live-eval
 #   merge-gate                 the diffs jev-gate-action judges on a PR
 on:
   workflow_dispatch:
+  # Weekly calibration, so a silent drift is caught without anyone remembering
+  # to run it. Monday 04:00 UTC, off the hours when a manual run is likely.
+  # Skipped when the API key secret is absent, so a fork does not fail red
+  # every week for a reason its owner cannot fix.
+  schedule:
+    - cron: "0 4 * * 1"
 
 permissions:
   contents: read
 
-# Manual runs only; serialize them so two calibrations never race.
+# Serialize runs so two calibrations never race (manual or scheduled).
 concurrency:
   group: live-eval
   cancel-in-progress: false
@@ -48,7 +54,20 @@ jobs:
       # packages/eval/dist is gitignored: the two build steps above must run first.
       # Low concurrency on purpose — the API sits behind Cloudflare, which answers
       # a burst with a 403 challenge rather than a 429.
+      - name: Check for the API key
+        id: key
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+        run: |
+          if [ -z "$TYPESAFE_API_KEY" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "TYPESAFE_API_KEY is not configured; skipping the live calibration." >&2
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run the golden dataset against the live API
+        if: steps.key.outputs.present == 'true'
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: >
@@ -57,6 +76,7 @@ jobs:
           --concurrency 3
           --out report-${{ matrix.baseline }}
       - name: Compare against the committed baseline (aggregate + slices)
+        if: steps.key.outputs.present == 'true'
         run: >
           node packages/eval/scripts/check-regression.mjs
           report-${{ matrix.baseline }}
