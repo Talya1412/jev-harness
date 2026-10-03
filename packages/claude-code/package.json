@@ -44,6 +44,6 @@
     "@types/node": "^22.10.2",
     "esbuild": "^0.28.2",
     "typescript": "^5.7.2",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.3"
   }
 }
