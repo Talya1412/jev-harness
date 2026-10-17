@@ -41,9 +41,9 @@
     "@jev-harness/kit": "^0.7.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
+    "@types/node": "^22.20.5",
     "typescript": "^5.7.2",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.4"
   },
   "keywords": [
     "jev",
