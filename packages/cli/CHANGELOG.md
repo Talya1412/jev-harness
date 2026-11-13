@@ -1,5 +1,14 @@
 # @jev-harness/cli
 
+## 0.8.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @jev-harness/core@0.8.0
+  - @jev-harness/eval@0.8.0
+  - @jev-harness/kit@0.8.0
+
 ## 0.7.0
 
 ### Patch Changes
