@@ -138,7 +138,29 @@ function resolveConfig(config) {
     redact: config.redact
   };
 }
-var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function abortError(operation) {
+  const error = new Error(`${operation} aborted`);
+  error.name = "AbortError";
+  return error;
+}
+function waitForRetry(attempt, operation, signal) {
+  if (signal?.aborted)
+    return Promise.reject(abortError(operation));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError(operation));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, 250 * attempt * attempt);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+function isRetryable(error) {
+  return error instanceof JevError ? error.retryable : error.name === "AbortError" || /fetch failed|ECONN|network|timeout|aborted/i.test(error.message);
+}
 function validateQuestions(questions) {
   const keys = Object.keys(questions ?? {});
   if (keys.length === 0)
@@ -209,12 +231,10 @@ async function askJev(config, state, questions, signal) {
   }
   const body = JSON.stringify({ model: cfg.model, state: effectiveState, questions });
   let lastError = null;
+  const operation = "Jev call";
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
-    if (signal?.aborted) {
-      const abortErr = new Error("Jev call aborted");
-      abortErr.name = "AbortError";
-      throw abortErr;
-    }
+    if (signal?.aborted)
+      throw abortError(operation);
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -226,52 +246,41 @@ async function askJev(config, state, questions, signal) {
         body,
         signal: controller.signal
       });
-      if (res.status === 429 || res.status >= 500) {
-        const text = await res.text().catch(() => "");
-        lastError = new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 300)}`, {
-          status: res.status,
-          retryable: true
-        });
-        if (attempt < cfg.maxAttempts) {
-          cfg.onRetry?.(attempt, lastError);
-          await sleep(250 * attempt * attempt);
-          continue;
-        }
-        throw lastError;
-      }
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new JevError(`Jev HTTP ${res.status}: ${text.slice(0, 500)}`, {
+        const retryable = res.status === 429 || res.status >= 500;
+        throw new JevError(`Jev HTTP ${res.status}: ${text.slice(0, retryable ? 300 : 500)}`, {
           status: res.status,
-          retryable: false
+          retryable
         });
       }
       let parsed;
       const raw = await res.text();
+      if (signal?.aborted)
+        throw abortError(operation);
       try {
         parsed = JSON.parse(raw);
       } catch {
         throw new JevError("Jev returned malformed JSON", { retryable: false });
       }
       const obj = parsed;
-      if (!obj || typeof obj !== "object" || !obj.answers || typeof obj.answers !== "object") {
+      if (!obj?.answers || typeof obj.answers !== "object" || Array.isArray(obj.answers)) {
         throw new JevError("Jev response is missing `answers`", { retryable: false });
       }
       return obj;
     } catch (err) {
+      if (signal?.aborted)
+        throw abortError(operation);
       const e = err instanceof Error ? err : new Error(String(err));
-      if (e instanceof JevError && !e.retryable)
+      if (!isRetryable(e) || attempt === cfg.maxAttempts)
         throw e;
       lastError = e;
-      const transient = e.name === "AbortError" || /fetch failed|ECONN|network|timeout|aborted/i.test(e.message);
-      if (!transient || attempt === cfg.maxAttempts)
-        throw e;
-      cfg.onRetry?.(attempt, e);
-      await sleep(250 * attempt * attempt);
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
     }
+    cfg.onRetry?.(attempt, lastError);
+    await waitForRetry(attempt, operation, signal);
   }
   throw lastError ?? new JevError("Jev call failed", { retryable: false });
 }

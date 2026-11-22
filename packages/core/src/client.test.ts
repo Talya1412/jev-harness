@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   askJev,
   listJevModels,
@@ -255,15 +255,36 @@ describe("askJev", () => {
     expect(n).toBe(1);
   });
 
-  it("rejects a response without answers", async () => {
-    const { impl } = stubFetch({ model: "jev-latest" });
+  it.each([{ model: "jev-latest" }, { model: "jev-latest", answers: [] }])(
+    "rejects a response without a valid answers map: %j",
+    async (payload) => {
+      const { impl } = stubFetch(payload);
+      await expect(
+        askJev(
+          { apiKey: "k", fetchImpl: impl },
+          { x: 1 },
+          { q: { type: "noul", instructions: "?" } },
+        ),
+      ).rejects.toThrow(/missing `answers`/);
+    },
+  );
+
+  it("does not schedule a retry when a caller aborts the request in flight", async () => {
+    const controller = new AbortController();
+    const onRetry = vi.fn();
+    const impl = (async () => {
+      controller.abort();
+      throw new DOMException("aborted", "AbortError");
+    }) as typeof fetch;
     await expect(
       askJev(
-        { apiKey: "k", fetchImpl: impl },
+        { apiKey: "k", fetchImpl: impl, onRetry },
         { x: 1 },
         { q: { type: "noul", instructions: "?" } },
+        controller.signal,
       ),
-    ).rejects.toThrow(/missing `answers`/);
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(onRetry).not.toHaveBeenCalled();
   });
 
   it("gives up after maxAttempts on persistent 500s", async () => {
@@ -301,22 +322,33 @@ describe("askJev", () => {
     expect(n).toBe(0);
   });
 
-  it("stops retrying when the signal aborts during backoff", async () => {
+  it("clears the pending retry delay as soon as the signal aborts", async () => {
     let n = 0;
     const impl = (async () => {
       n++;
       return new Response("boom", { status: 500 });
     }) as unknown as typeof fetch;
     const controller = new AbortController();
-    await expect(
-      askJev(
-        { apiKey: "k", fetchImpl: impl, maxAttempts: 3, onRetry: () => controller.abort() },
+    vi.useFakeTimers();
+    try {
+      const error = askJev(
+        { apiKey: "k", fetchImpl: impl, maxAttempts: 3 },
         { x: 1 },
         { q: { type: "noul", instructions: "?" } },
         controller.signal,
-      ),
-    ).rejects.toThrow(/aborted/);
-    expect(n).toBe(1);
+      ).catch((err: unknown) => err);
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      const pendingTimers = vi.getTimerCount();
+      await vi.runAllTimersAsync();
+      expect(pendingTimers).toBe(0);
+      expect(await error).toMatchObject({ name: "AbortError" });
+      expect(n).toBe(1);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -368,6 +400,19 @@ describe("listJevModels", () => {
       listJevModels({ apiKey: "k", fetchImpl: impl }, controller.signal),
     ).rejects.toThrow(/aborted/);
     expect(n).toBe(0);
+  });
+
+  it("does not schedule a retry when a caller aborts a models request in flight", async () => {
+    const controller = new AbortController();
+    const onRetry = vi.fn();
+    const impl = (async () => {
+      controller.abort();
+      throw new DOMException("aborted", "AbortError");
+    }) as typeof fetch;
+    await expect(
+      listJevModels({ apiKey: "k", fetchImpl: impl, onRetry }, controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(onRetry).not.toHaveBeenCalled();
   });
 
   it("aborts a hung models call at the configured timeout", async () => {

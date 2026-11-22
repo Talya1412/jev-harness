@@ -62,11 +62,26 @@ Exits 0 when every case passed, 1 when cases failed, 2 on usage errors.
 
 Labels: noul -> true/false or "yes"/"no"; choice -> criteria key; score -> level name or 0-based index.`;
 
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {};
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
-    const next = () => argv[++i];
+    const next = () => {
+      const value = argv[++i];
+      if (!value || value.startsWith("--") || value === "-h") {
+        throw new Error(`${flag} requires a value`);
+      }
+      return value;
+    };
+    const positiveInteger = (max = Number.MAX_SAFE_INTEGER) => {
+      const value = Number(next());
+      if (!Number.isSafeInteger(value) || value < 1 || value > max) {
+        throw new Error(`${flag} must be an integer between 1 and ${max}`);
+      }
+      return value;
+    };
     switch (flag) {
       case "--dataset":
         args.dataset = next();
@@ -84,13 +99,13 @@ function parseArgs(argv: string[]): CliArgs {
         args.baseUrl = next();
         break;
       case "--timeout-ms":
-        args.timeoutMs = Number(next());
+        args.timeoutMs = positiveInteger(MAX_TIMEOUT_MS);
         break;
       case "--concurrency":
-        args.concurrency = Number(next());
+        args.concurrency = positiveInteger();
         break;
       case "--sweep-steps":
-        args.sweepSteps = Number(next());
+        args.sweepSteps = positiveInteger();
         break;
       case "--no-sweep":
         args.noSweep = true;
@@ -179,7 +194,16 @@ export async function runEvalCli(argv: string[], io: Partial<EvalCliIo> = {}): P
   }
 
   sinks.out(formatReport(report) + "\n");
-  if (args.out) writeFileSync(args.out, JSON.stringify(report, null, 2) + "\n");
+  if (args.out) {
+    try {
+      writeFileSync(args.out, JSON.stringify(report, null, 2) + "\n");
+    } catch (err) {
+      sinks.err(
+        `could not write report to ${args.out}: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return EVAL_EXIT_FAILED;
+    }
+  }
   if (report.failedCases > 0) {
     sinks.err(`${report.failedCases}/${report.totalCases} case(s) failed — see the report\n`);
     return args.noFail ? EVAL_EXIT_OK : EVAL_EXIT_FAILED;

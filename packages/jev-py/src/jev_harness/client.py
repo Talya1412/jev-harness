@@ -8,6 +8,7 @@ runtimes.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import fields, is_dataclass
 import json
 import urllib.error
 import urllib.request
@@ -45,14 +46,14 @@ def _resolve_config(config: JevConfig) -> Dict[str, Any]:
 
 def _question_to_dict(q: Any) -> Dict[str, Any]:
     if isinstance(q, dict):
-        d = dict(q)
-        return d
-    # dataclass
-    import dataclasses as _dc
-
-    if _dc.is_dataclass(q):
-        return {k: getattr(q, k) for k in q.__dataclass_fields__}
-    raise JevError(f"question must be a dict or dataclass, got {type(q).__name__}", retryable=False)
+        question = dict(q)
+    else:
+        if not is_dataclass(q) or isinstance(q, type):
+            raise JevError(f"question must be a dict or dataclass, got {type(q).__name__}", retryable=False)
+        question = {field.name: getattr(q, field.name) for field in fields(q)}
+    if question.get("type") == "noul" and question.get("criteria") is None:
+        question.pop("criteria", None)
+    return question
 
 
 def validate_questions(questions: Optional[Dict[str, Any]]) -> None:
@@ -61,19 +62,28 @@ def validate_questions(questions: Optional[Dict[str, Any]]) -> None:
         raise JevError("questions must be a non-empty object", retryable=False)
     for key, q in questions.items():
         qd = _question_to_dict(q)
-        if not qd.get("instructions"):
+        instructions = qd.get("instructions")
+        if not isinstance(instructions, str) or not instructions:
             raise JevError(f'question "{key}" needs a non-empty instructions string', retryable=False)
         qtype = qd.get("type")
+        criteria = qd.get("criteria")
         if qtype == "choice":
-            n = len(qd.get("criteria") or {})
-            if n < 2:
-                raise JevError(f'choice "{key}" needs at least 2 criteria', retryable=False)
+            if not isinstance(criteria, dict) or len(criteria) < 2:
+                raise JevError(f'choice "{key}" needs a map of at least 2 options', retryable=False)
+            for option, description in criteria.items():
+                if not isinstance(option, str) or not isinstance(description, str):
+                    raise JevError(f'choice "{key}" option names and descriptions must be strings', retryable=False)
         elif qtype == "score":
-            crit = qd.get("criteria") or []
-            n = len(crit) if isinstance(crit, list) else 0
-            if n < 2:
-                raise JevError(f'score "{key}" needs at least 2 ordered levels', retryable=False)
-        elif qtype != "noul":
+            if not isinstance(criteria, list) or not 2 <= len(criteria) <= 10:
+                raise JevError(f'score "{key}" needs 2 to 10 ordered levels', retryable=False)
+            if not all(isinstance(level, str) for level in criteria):
+                raise JevError(f'score "{key}" levels must be strings', retryable=False)
+        elif qtype == "noul":
+            if criteria is not None and not isinstance(criteria, (str, dict)):
+                raise JevError(f'noul "{key}" criteria must be prose or a {{true, false}} map', retryable=False)
+            if isinstance(criteria, dict) and criteria.keys() - {"true", "false"}:
+                raise JevError(f'noul "{key}" criteria keys must be "true"/"false"', retryable=False)
+        else:
             raise JevError(f'question "{key}" has unknown type "{qtype}"', retryable=False)
 
 

@@ -33,6 +33,14 @@ function okFetch(onCall?: (i: number) => void) {
 }
 
 describe("runEval", () => {
+  it("rejects an invalid concurrency value before starting any cases", async () => {
+    const { impl, calls } = okFetch();
+    await expect(
+      runEval({ apiKey: "k", fetchImpl: impl }, dataset(3), { concurrency: Number.NaN }),
+    ).rejects.toThrow(/concurrency must be a positive integer/);
+    expect(calls()).toBe(0);
+  });
+
   it("counts every attempt in requests and prices output as free", async () => {
     const { impl } = okFetch();
     const report = await runEval({ apiKey: "k", fetchImpl: impl }, dataset(3), { sweep: false });
