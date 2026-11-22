@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from jev_harness import JevConfig, JevError, ask_jev, noul, choice, score, validate_questions
+from jev_harness import JevConfig, JevError, NoulQuestion, ask_jev, noul, choice, score, validate_questions
 from jev_harness.client import _resolve_config
 
 
@@ -48,6 +48,25 @@ def test_validate_questions_accepts_good_map():
         "b": {"type": "choice", "instructions": "x", "criteria": {"a": "1", "b": "2"}},
         "c": {"type": "score", "instructions": "x", "criteria": ["low", "high"]},
     })
+
+
+@pytest.mark.parametrize("question", [
+    {"type": "noul", "instructions": 1},
+    {"type": "noul", "instructions": "x", "criteria": {"yes": "a", "no": "b"}},
+    {"type": "choice", "instructions": "x", "criteria": ["a", "b"]},
+    {"type": "choice", "instructions": "x", "criteria": {"a": "first", "b": 2}},
+    {"type": "score", "instructions": "x", "criteria": [str(level) for level in range(11)]},
+    {"type": "score", "instructions": "x", "criteria": ["low", 1]},
+])
+def test_rejects_malformed_questions_before_calling_the_api(fake_jev, question):
+    with pytest.raises(JevError):
+        run(ask_jev(fake_jev.config(), {"sample": 1}, {"q": question}))
+    assert not fake_jev.calls
+
+
+def test_noul_dataclass_omits_unspecified_criteria(fake_jev):
+    run(ask_jev(fake_jev.config(), {"sample": 1}, {"q": NoulQuestion(instructions="x")}))
+    assert fake_jev.calls[0]["questions"]["q"] == {"type": "noul", "instructions": "x"}
 
 
 def test_ask_jev_requires_state(fake_jev):

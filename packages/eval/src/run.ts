@@ -124,7 +124,10 @@ export async function runEval(
     throw new Error('dataset has no questions — add a "questions" map or pass --questions');
   }
 
-  const concurrency = Math.max(1, opts.concurrency ?? 4);
+  const concurrency = opts.concurrency ?? 4;
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    throw new Error("concurrency must be a positive integer");
+  }
   const cases = dataset.cases;
   const results: Array<{ ok: boolean; response?: JevResponse; error?: string }> = new Array(
     cases.length,

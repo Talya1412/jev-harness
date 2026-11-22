@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { runEvalCli } from "../src/cli.js";
 
 const ENV_KEYS = ["TYPESAFE_API_KEY"] as const;
@@ -55,6 +55,41 @@ describe("runEvalCli exit codes", () => {
     const s = sinks();
     expect(await runEvalCli(["--help"], s.io)).toBe(0);
     expect(s.read().out).toMatch(/jev-eval/);
+  });
+
+  it.each([
+    ["--concurrency", "invalid"],
+    ["--concurrency", "0"],
+    ["--timeout-ms", "2147483648"],
+    ["--sweep-steps", "1.5"],
+    ["--sweep-steps", "--no-sweep"],
+  ])("reports usage for %s %s without calling the API", async (flag, value) => {
+    process.env.TYPESAFE_API_KEY = "k";
+    const fetch = vi.fn(async () => new Response("bad", { status: 400 }));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const s = sinks();
+      expect(await runEvalCli(["--dataset", await datasetFile(), flag, value], s.io)).toBe(2);
+      expect(s.read().err).toContain(flag);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("reports a run failure when the report cannot be written", async () => {
+    process.env.TYPESAFE_API_KEY = "k";
+    const path = await datasetFile();
+    vi.stubGlobal("fetch", async () =>
+      Response.json({ model: "jev-latest", answers: { q: { type: "noul", noul: 0.4 } } }),
+    );
+    try {
+      const s = sinks();
+      expect(await runEvalCli(["--dataset", path, "--out", dirname(path)], s.io)).toBe(1);
+      expect(s.read().err).toContain(dirname(path));
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("returns 1 when every case failed, 0 with --no-fail", async () => {
